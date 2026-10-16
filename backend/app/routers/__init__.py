@@ -1,0 +1,1 @@
+"""API 路由包：按资源拆分，全部以 /api 为前缀，由 main.py 统一 include。"""
