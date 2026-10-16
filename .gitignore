@@ -1,0 +1,15 @@
+# Python virtual environments and bytecode
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Node.js dependencies and generated frontend files
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Local environment configuration (may contain credentials)
+.env
+.env.*
+!.env.example
