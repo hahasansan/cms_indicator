@@ -1,7 +1,17 @@
 <template>
-    <div class="page data-list-page">
+    <ReportImportList
+      v-if="showReportList"
+      show-back
+      @reload="emitReload"
+      @back="showReportList = false"
+    />
+    <div v-else class="page data-list-page">
       <div class="page-head">
         <div><h1>模型管理</h1><div class="desc">按业务域管理数据模型，维护字段口径、角色、属性、样例数据、引用指标和上下游血缘。</div></div>
+        <div class="actions">
+          <el-button @click="showReportList = true">将系统报表导入</el-button>
+          <el-button type="primary" @click="sqlImportOpen = true">自定义 SQL 导入</el-button>
+        </div>
       </div>
 
       <div class="model-main-layout data-list-main">
@@ -150,12 +160,15 @@
         </template>
       </el-dialog>
     </div>
+    <CustomSqlImportDialog v-model="sqlImportOpen" @reload="emitReload" />
 
 </template>
 
 <script lang="ts">
 import { defineComponent, inject, ref, ref as vueRef, computed as vueComputed, watch as vueWatch } from 'vue'
+import CustomSqlImportDialog from '../../components/CustomSqlImportDialog.vue'
 import { api as requestApi, jsonBody as toJsonBody } from '../../api'
+import ReportImportList from '../../components/ReportImportList.vue'
 import type {
   BootstrapData as BootstrapDataT,
   DataModel as DataModelT,
@@ -180,10 +193,13 @@ function getResultTable(indicator: IndicatorOptionT) {
 }
 
 const ModelsPage = defineComponent({
+  components: { CustomSqlImportDialog, ReportImportList },
   props: { data: { type: Object as () => BootstrapDataT, required: true } },
   emits: ['reload'],
   setup(props, { emit }) {
     const notify = useNotify()
+    const showReportList = vueRef(false)
+    const sqlImportOpen = vueRef(false)
     const activeId = vueRef('')
     const drawerOpen = vueRef(false)
     const keyword = vueRef('')
@@ -328,9 +344,13 @@ const ModelsPage = defineComponent({
       currentPage.value = 1
       loadModels()
     }
+    async function emitReload() {
+      emit('reload')
+      await loadModels()
+    }
     vueWatch(pageSize, () => { currentPage.value = 1; loadModels() })
     loadModels()
-    return { activeId, active, drawerOpen, activeTab, keyword, selectedModule, modules, total, currentPage, pageSize, modelList, loading, counts, referencedIndicators, filteredFields, fieldGroups, fieldCounts, fieldKeyword, fieldRole, fieldDialogOpen, editingField, fieldCategoryFilter, dictCategories, filteredDictSets, onFieldCategoryChange, openDetail, openFieldEditor, closeFieldEditor, saveField, selectModule, query, loadModels, getResultTable }
+    return { activeId, active, drawerOpen, activeTab, keyword, selectedModule, modules, total, currentPage, pageSize, modelList, loading, counts, referencedIndicators, filteredFields, fieldGroups, fieldCounts, fieldKeyword, fieldRole, fieldDialogOpen, editingField, fieldCategoryFilter, dictCategories, filteredDictSets, onFieldCategoryChange, openDetail, openFieldEditor, closeFieldEditor, saveField, selectModule, query, loadModels, getResultTable, showReportList, sqlImportOpen, emitReload }
   },
 
 })

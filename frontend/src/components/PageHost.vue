@@ -3,7 +3,6 @@
    s <OverviewPage v-if="view === 'overview'" :data="data" @go="go" />
     <ModelsPage v-else-if="view === 'models'" :data="data" @reload="reload" />
     <DictPage v-else-if="view === 'dict'" :data="data" @reload="reload" />
-    <ReportListPage v-else-if="view === 'reports'" :data="data" @reload="reload" />
     <BuilderPage v-else-if="view === 'builder'" :data="data" :editing-id="editingId" @saved="saved" @back="back" />
     <IndicatorsPage v-else-if="view === 'indicators'" :data="data" @go="go" @edit="edit" @reload="reload" />
     <VersionsPage v-else-if="view === 'versions'" :data="data" :indicator-id="indicatorId" @go="go" @reload="reload" />
@@ -27,7 +26,6 @@
 import OverviewPage from '../views/dashboard/OverviewPage.vue'
 import ModelsPage from '../views/data-assets/ModelsPage.vue'
 import DictPage from '../views/data-assets/DictPage.vue'
-import ReportListPage from '../views/data-assets/ReportListPage.vue'
 import BuilderPage from '../views/indicator-center/BuilderPage.vue'
 import ImpactPage from '../views/indicator-center/ImpactPage.vue'
 import IndicatorsPage from '../views/indicator-center/IndicatorsPage.vue'

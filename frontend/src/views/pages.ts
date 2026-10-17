@@ -1,7 +1,6 @@
 export { default as OverviewPage } from './dashboard/OverviewPage.vue'
 export { default as ModelsPage } from './data-assets/ModelsPage.vue'
 export { default as DictPage } from './data-assets/DictPage.vue'
-export { default as ReportListPage } from './data-assets/ReportListPage.vue'
 export { default as BuilderPage } from './indicator-center/BuilderPage.vue'
 export { default as ImpactPage } from './indicator-center/ImpactPage.vue'
 export { default as IndicatorsPage } from './indicator-center/IndicatorsPage.vue'
