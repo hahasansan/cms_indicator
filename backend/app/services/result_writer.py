@@ -15,7 +15,7 @@ import json
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.utils import new_id
+from app.utils.common import new_id
 
 UNIFIED_TABLE = "T_IND_RESULT"
 FIELD_COUNT = 25
@@ -97,4 +97,3 @@ def save_field_map(db: Session, indicator_id: str, field_map: dict[str, str]) ->
         text('UPDATE indicators SET "FIELD_MAP_JSON" = :fm, "UPDATED_AT" = CURRENT_TIMESTAMP WHERE "ID" = :id'),
         {"fm": json.dumps(field_map, ensure_ascii=False), "id": indicator_id},
     )
-

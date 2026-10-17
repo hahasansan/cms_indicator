@@ -15,15 +15,15 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8800
 ```
 
-后端启动时会按 `backend/.env` 中的 `APP_DATABASE` 配置连接数据库，并自动运行 Alembic 迁移，将数据库表结构更新到项目当前版本；首次启动还会初始化系统数据。默认模式为 `local`，使用项目根目录下的 `data/indicator_system_pro.db`（SQLite）。
+后端只支持达梦数据库。启动时会读取 `backend/.env` 中的达梦连接配置，自动运行 Alembic 迁移，将数据库表结构更新到项目当前版本；首次启动还会初始化系统数据。
 
-达梦数据库，请先在 `backend/.env` 中配置数据库连接信息（`APP_DATABASE=dameng` 及相应的达梦连接配置），并确保数据库服务已启动。已有达梦服务可按实际安装路径启动，例如：
+请先在 `backend/.env` 中配置达梦连接信息，并确保数据库服务已启动。已有达梦服务可按实际安装路径启动，例如：
 
 ```powershell
 .\server\bin\dmserver.exe .\indicator\dm.ini
 ```
 
-迁移更新的是表结构，不会把 SQLite 中的业务数据自动复制到达梦数据库。连接达梦库前请确认配置指向正确的数据库，并备份重要数据。
+迁移仅更新表结构并初始化系统数据，不会导入其他数据库中的业务数据。连接达梦库前请确认配置指向正确的数据库，并备份重要数据。
 
 ### 2. 启动前端
 

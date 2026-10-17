@@ -5,16 +5,16 @@ from fastapi import Depends, HTTPException, APIRouter, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.db import get_db
-from app.models import DataModel, ModelField
+from app.entity.models import DataModel, ModelField
 from app.routers._model_import import (
     build_model_from_sql,
     do_sql_preview,
     do_sql_resolve_preview,
 )
 from app.routers.reports import import_report_model
-from app.schemas import FieldIn, ModelCreateIn, SqlTemplatePreviewIn, SqlResolvePreviewIn
-from app.serializers import model_to_dict
+from app.entity.schemas import FieldIn, ModelCreateIn, SqlTemplatePreviewIn, SqlResolvePreviewIn
+from app.utils.database import get_db
+from app.utils.serializers import model_to_dict
 
 router = APIRouter(tags=["模型"])
 

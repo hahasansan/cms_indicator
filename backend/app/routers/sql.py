@@ -5,9 +5,9 @@ from fastapi import Depends, APIRouter
 from sqlalchemy.orm import Session
 
 from app.core.config import get_dameng_config
-from app.db import get_db
+from app.utils.database import get_db
 from app.routers.deps import build_indicator_sql
-from app.schemas import SqlPreviewIn
+from app.entity.schemas import SqlPreviewIn
 from app.services.dameng import query_rows as dm_query_rows
 
 router = APIRouter(tags=["SQL 试算"])

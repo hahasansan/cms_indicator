@@ -6,21 +6,21 @@ from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_dameng_config
-from app.db import SessionLocal, get_db
-from app.models import DataModel, ModelField
+from app.entity.models import DataModel, ModelField
 from app.routers.deps import report_row
 from app.routers._model_import import (
     build_model_from_sql,
     do_sql_preview,
     do_sql_resolve_preview,
 )
-from app.schemas import BatchImportIn, ModelCreateIn, ReportImportIn, ResolvePreviewIn
-from app.serializers import model_to_dict
+from app.entity.schemas import BatchImportIn, ModelCreateIn, ReportImportIn, ResolvePreviewIn
 from app.services.dameng import describe_query as dm_describe_query
 from app.services.report_engine import (
     detect_biz_date,
 )
-from app.utils import new_id
+from app.utils.common import new_id
+from app.utils.database import SessionLocal, get_db
+from app.utils.serializers import model_to_dict
 
 router = APIRouter(tags=["报表"])
 

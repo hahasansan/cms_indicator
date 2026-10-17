@@ -1,3 +1,5 @@
+"""通用工具函数。"""
+
 from datetime import datetime
 from secrets import token_hex
 

@@ -7,9 +7,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.db import get_db
-from app.models import DictCategory, DictItem, DictSet
-from app.schemas import DictCategoryIn, DictItemIn, DictSetIn
+from app.entity.models import DictCategory, DictItem, DictSet
+from app.entity.schemas import DictCategoryIn, DictItemIn, DictSetIn
+from app.utils.database import get_db
 
 router = APIRouter(tags=["码值"])
 

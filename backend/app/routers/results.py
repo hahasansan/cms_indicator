@@ -7,9 +7,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.db import get_db
-from app.models import Indicator
-from app.serializers import indicator_to_dict
+from app.entity.models import Indicator
+from app.utils.database import get_db
+from app.utils.serializers import indicator_to_dict
 from app.services.result_query import PhysicalResultQuery, ResultQuery
 
 router = APIRouter(tags=["结果"])

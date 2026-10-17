@@ -5,8 +5,8 @@
 """
 from __future__ import annotations
 
-from app.db import SessionLocal
-from app.models import DictCategory, DictItem, DictSet
+from app.entity.models import DictCategory, DictItem, DictSet
+from app.utils.database import SessionLocal
 
 # 分类（编码、名称、排序、备注）
 CATEGORIES = [

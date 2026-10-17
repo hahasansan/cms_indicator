@@ -1,8 +1,8 @@
-"""Alembic 环境：复用 app 的双库配置（SQLite local / Dameng）。
+"""Alembic 环境：复用应用中的达梦数据库配置。
 
-- URL 取自 app.core.config.settings（与 db.py 同一个引擎来源）
-- target_metadata 用 app.db.Base.metadata（ORM 表定义）
-- dameng 模式依赖 dmSQLAlchemy 注册方言，这里 import app.db 触发（与 app 一致）
+- URL 取自 app.core.config.settings（与数据库引擎使用相同来源）
+- target_metadata 用 app.utils.database.Base.metadata（ORM 表定义）
+- import app.utils.database 触发 dmSQLAlchemy 方言注册
 """
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.core.config import settings  # noqa: E402
-from app.db import Base  # noqa: E402  # 触发 dmSQLAlchemy 方言注册（dameng 模式）
-import app.models  # noqa: E402, F401 - 注册全部 ORM 表到 Base.metadata
+from app.utils.database import Base  # noqa: E402  # 触发 dmSQLAlchemy 方言注册
+import app.entity.models  # noqa: E402, F401 - 注册全部 ORM 表到 Base.metadata
 
 # 覆盖 ini 里的 sqlalchemy.url，固定用 app 配置的一致来源。
 # 注意：SQLAlchemy 2 的 str(url) 会把密码掩盖成 ***，必须显式 hide_password=False，

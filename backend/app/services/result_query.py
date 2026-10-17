@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.models import Indicator
+from app.entity.models import Indicator
 from app.services.result_writer import UNIFIED_TABLE
 
 

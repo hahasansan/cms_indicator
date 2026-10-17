@@ -15,7 +15,7 @@ from apscheduler.triggers.cron import CronTrigger
 TZ = ZoneInfo("Asia/Shanghai")
 
 _scheduler = BackgroundScheduler(timezone=TZ)
-_runner = None  # 由 main.py 注册的批量运行函数 (db, scope, category_id, indicator_ids, date_option)
+_runner = None  # 由 startup.py 注册的批量运行函数 (db, scope, category_id, indicator_ids, date_option)
 
 
 def set_runner(func) -> None:
@@ -41,8 +41,8 @@ def build_trigger(frequency: str, run_time: str) -> CronTrigger | None:
 def run_schedule_job(schedule_id: str) -> None:
     if not _runner:
         return
-    from app.db import SessionLocal
-    from app.models import Schedule
+    from app.entity.models import Schedule
+    from app.utils.database import SessionLocal
 
     db = SessionLocal()
     try:
@@ -65,8 +65,8 @@ def _job_id(schedule_id: str) -> str:
 
 def upsert(schedule_id: str) -> None:
     """注册或更新一个调度为 APScheduler job（幂等）。禁用或无触发器的调度会被移除。"""
-    from app.db import SessionLocal
-    from app.models import Schedule
+    from app.entity.models import Schedule
+    from app.utils.database import SessionLocal
 
     db = SessionLocal()
     try:
@@ -108,8 +108,8 @@ def next_run_time(frequency: str, run_time: str) -> datetime | None:
 
 def sync_schedules() -> None:
     """把当前启用的调度全部注册（启动时调用；运行期新增/编辑走 upsert）。"""
-    from app.db import SessionLocal
-    from app.models import Schedule
+    from app.entity.models import Schedule
+    from app.utils.database import SessionLocal
 
     db = SessionLocal()
     try:

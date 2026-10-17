@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation
 
 from sqlalchemy.orm import Session
 
-from app.models import DataModel, Indicator
+from app.entity.models import DataModel, Indicator
 
 
 DERIVATIVE_LABELS = {

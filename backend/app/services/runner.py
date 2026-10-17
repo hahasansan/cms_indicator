@@ -12,14 +12,14 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.config import get_dameng_config
-from app.models import DataModel, Indicator, JobRun
-from app.schemas import RunIn
+from app.entity.models import DataModel, Indicator, JobRun
+from app.entity.schemas import RunIn
 from app.services.biz_date import resolve_biz_dates
 from app.services.dameng import query_rows as dm_query_rows
 from app.services.report_engine import resolve_report_for_date
 from app.services.result_writer import build_field_map, rows_to_wide, save_field_map, write_results
 from app.services.sql_engine import generate_indicator_sql, result_dimension_names, result_metric_names
-from app.utils import new_id
+from app.utils.common import new_id
 
 logger = get_logger("runner")
 

@@ -7,16 +7,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
-from sqlalchemy.engine import URL, make_url
+from sqlalchemy.engine import URL
 
 if TYPE_CHECKING:
     from app.services.dameng import DamengConfig
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
-PROJECT_DIR = BACKEND_DIR.parent
-DATA_DIR = PROJECT_DIR / "data"
-LEGACY_SQLITE_PATH = DATA_DIR / "indicator_system_pro.db"
 
 load_dotenv(BACKEND_DIR / ".env")
 
@@ -37,20 +34,13 @@ def _schema(value: str) -> str:
 
 @dataclass(frozen=True)
 class Settings:
-    database_mode: str
     database_url: URL
     dm_schema: str
     cors_origins: tuple[str, ...] = ("*",)
 
     @property
     def database_label(self) -> str:
-        if self.database_mode == "local":
-            return str(self.database_url.database)
         return f"{self.database_url.host}:{self.database_url.port}/{self.dm_schema}"
-
-    @property
-    def is_local(self) -> bool:
-        return self.database_mode == "local"
 
 
 def _cors_origins() -> tuple[str, ...]:
@@ -59,42 +49,6 @@ def _cors_origins() -> tuple[str, ...]:
 
 
 def load_settings() -> Settings:
-    mode = (os.getenv("APP_DATABASE") or "local").strip().lower()
-    if mode in {"sqlite", "sqlite3", "本地"}:
-        mode = "local"
-    if mode not in {"local", "dameng", "dm"}:
-        raise RuntimeError("APP_DATABASE 只能配置为 local 或 dameng")
-
-    if mode == "local":
-        raw_path = (os.getenv("LOCAL_DATABASE_PATH") or "").strip()
-        database_path = Path(raw_path) if raw_path else LEGACY_SQLITE_PATH
-        if not database_path.is_absolute():
-            database_path = (PROJECT_DIR / database_path).resolve()
-        database_path.parent.mkdir(parents=True, exist_ok=True)
-        return Settings(
-            database_mode="local",
-            database_url=URL.create("sqlite", database=str(database_path)),
-            dm_schema="",
-            cors_origins=_cors_origins(),
-        )
-
-    raw_url = (os.getenv("DM_DATABASE_URL") or "").strip()
-    if raw_url:
-        url = make_url(raw_url)
-        if url.get_backend_name() != "dm":
-            raise RuntimeError("DM_DATABASE_URL 必须使用 dm 或 dm+dmPython 驱动")
-        if not url.host or not url.username:
-            raise RuntimeError("DM_DATABASE_URL 必须包含达梦主机和用户名")
-        if url.password is None:
-            raise RuntimeError("DM_DATABASE_URL 必须包含达梦数据库密码")
-        schema = _schema(os.getenv("DM_SCHEMA") or url.database or url.username)
-        return Settings(
-            database_mode="dameng",
-            database_url=url,
-            dm_schema=schema,
-            cors_origins=_cors_origins(),
-        )
-
     host = _required(os.getenv("DM_HOST", "101.34.72.65"), "DM_HOST")
     username = _required(os.getenv("DM_USERNAME", "ZIJIN"), "DM_USERNAME")
     password = _required(os.getenv("DM_PASSWORD", "ZIJIN1234q"), "DM_PASSWORD")
@@ -114,7 +68,6 @@ def load_settings() -> Settings:
         port=port,
     )
     return Settings(
-        database_mode="dameng",
         database_url=url,
         dm_schema=schema,
         cors_origins=_cors_origins(),

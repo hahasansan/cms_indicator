@@ -4,10 +4,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.db import get_db
-from app.models import JobRun
-from app.schemas import BatchRunIn
-from app.serializers import clean_dict, dt
+from app.entity.models import JobRun
+from app.entity.schemas import BatchRunIn
+from app.utils.database import get_db
+from app.utils.serializers import clean_dict, dt
 from app.services.runner import run_batch_indicators
 
 router = APIRouter(tags=["运行"])

@@ -1,4 +1,4 @@
-from app.db import engine
+from app.utils.database import engine
 from sqlalchemy import text
 
 with engine.connect() as c:

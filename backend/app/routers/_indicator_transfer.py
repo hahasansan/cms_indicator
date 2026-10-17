@@ -15,11 +15,11 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.db import get_db
-from app.models import DataModel, Indicator, IndicatorCategory, IndicatorVersion
+from app.entity.models import DataModel, Indicator, IndicatorCategory, IndicatorVersion
 from app.routers.deps import build_indicator_sql
 from app.routers.indicators import _next_indicator_code
-from app.utils import new_id
+from app.utils.common import new_id
+from app.utils.database import get_db
 
 router = APIRouter(tags=["指标迁移"])
 

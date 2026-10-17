@@ -4,17 +4,17 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.core.config import get_dameng_config
-from app.db import SessionLocal
-from app.models import DataModel, ModelField
-from app.schemas import ModelCreateIn, ReportImportIn, ResolvePreviewIn
-from app.serializers import model_to_dict
+from app.entity.models import DataModel, ModelField
+from app.entity.schemas import ModelCreateIn, ReportImportIn, ResolvePreviewIn
 from app.services.dameng import describe_query as dm_describe_query
 from app.services.report_engine import (
     detect_biz_date,
     extract_optional_param_fields,
     resolve_report_for_date,
 )
-from app.utils import new_id
+from app.utils.common import new_id
+from app.utils.database import SessionLocal
+from app.utils.serializers import model_to_dict
 
 
 def _extract_fields_from_titles(titles, output_map: dict[str, str]) -> list[dict]:
