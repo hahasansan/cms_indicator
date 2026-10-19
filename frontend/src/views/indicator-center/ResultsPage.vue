@@ -1,7 +1,7 @@
 <template>
   <div class="page data-list-page">
     <div class="page-head">
-      <div><h1>指标数据查询</h1><div class="desc">从指标树选择多个指标，系统自动识别共有维度并统一查询。</div></div>
+      <div><h1>指标数据查询</h1><div class="desc">从指标树选择多个指标，结果按完整维度组合对齐展示。</div></div>
       <div class="actions">
         <span class="muted">{{ visibleIndicators.length }} 个可用指标 · 已选 {{ selectedIds.length }} 个</span>
         <el-button @click="goBack">返回</el-button>
@@ -28,13 +28,13 @@
 
       <div class="iq-main-panel">
         <el-card shadow="never">
-          <template #header><div class="iq-head-bar"><strong>查询条件</strong><span class="muted">共有维度会根据已选指标自动计算</span></div></template>
+          <template #header><div class="iq-head-bar"><strong>查询条件</strong><span class="muted">共有维度用于筛选，结果展示所有已选指标的维度和度量</span></div></template>
           <div class="iq-shared">
-            <div class="iq-shared-label">共有维度</div>
+            <div class="iq-shared-label">可筛选维度</div>
             <div v-if="selectedIds.length && commonFields.length" class="iq-shared-list">
               <el-tag v-for="field in commonFields" :key="`${field.kind}-${field.name}`" size="small">{{ field.alias }}</el-tag>
             </div>
-            <div v-else class="iq-shared-placeholder">选择两个或多个指标后，系统将在这里显示可共同查询的字段</div>
+            <div v-else class="iq-shared-placeholder">选择指标后，系统将在这里显示适用于所有已选指标的维度</div>
           </div>
           <div class="iq-condition-row">
             <label class="iq-condition-field">
@@ -75,11 +75,34 @@
           </template>
           <div v-if="loading" class="iq-result-empty"><span class="iq-loading-mark">…</span><b>正在查询指标数据</b></div>
           <div v-else-if="!tableRows.length" class="iq-result-empty"><b>{{ selectedIds.length ? '暂无查询结果' : '请先选择指标' }}</b><span>{{ selectedIds.length ? '调整日期或查询条件后重试' : '从左侧指标树勾选一个或多个指标' }}</span></div>
-          <el-table v-else :data="tableRows" size="small">
-            <el-table-column label="统计期间" width="190"><template #default="{ row }">{{ periodLabel(row) }}</template></el-table-column>
-            <el-table-column label="指标名称" min-width="180"><template #default="{ row }"><b>{{ row.indicatorName }}</b><small class="muted">{{ row.indicatorCode }}</small></template></el-table-column>
-            <el-table-column v-for="column in dimensionColumns" :key="column" :label="column" min-width="130"><template #default="{ row }">{{ formatValue(row.dimensions[column]) }}</template></el-table-column>
-            <el-table-column v-for="column in resultColumns" :key="column" :label="column" min-width="130" align="right"><template #default="{ row }">{{ formatValue(row.values[column]) }}</template></el-table-column>
+          <el-table v-else :data="tableRows" size="small" class="result-table">
+            <el-table-column label="统计期间" width="190" class-name="result-dimension-shared" label-class-name="result-dimension-shared">
+              <template #header><el-tooltip content="统计期间" placement="top"><span>统计期间</span></el-tooltip></template>
+              <template #default="{ row }">{{ periodLabel(row) }}</template>
+            </el-table-column>
+            <el-table-column
+              v-for="column in dimensionColumns"
+              :key="column"
+              :label="column"
+              :class-name="dimensionClass(column)"
+              :label-class-name="dimensionClass(column)"
+              min-width="130"
+            >
+              <template #header><el-tooltip :content="dimensionOwnerNames(column)" placement="top"><span>{{ column }}</span></el-tooltip></template>
+              <template #default="{ row }">{{ formatValue(row.dimensions[column]) }}</template>
+            </el-table-column>
+            <el-table-column
+              v-for="column in flatMeasureColumns"
+              :key="column.key"
+              :label="column.alias"
+              :class-name="measureClass(column)"
+              :label-class-name="measureClass(column)"
+              min-width="150"
+              align="right"
+            >
+              <template #header><el-tooltip :content="column.indicatorName" placement="top"><span>{{ column.alias }}</span></el-tooltip></template>
+              <template #default="{ row }">{{ formatValue(row.values[column.key]) }}</template>
+            </el-table-column>
           </el-table>
           <div v-if="tableRows.length" class="iq-pagination">
             <span class="muted">第 {{ page }} 页</span>
@@ -92,11 +115,34 @@
 
     <el-dialog v-model="windowQuery" title="指标查询结果" width="960px" append-to-body>
       <div class="muted">已选 {{ selectedIds.length }} 个指标 · {{ tableRows.length }} 行结果</div>
-      <el-table :data="tableRows" size="small" max-height="420">
-        <el-table-column label="统计期间" width="190"><template #default="{ row }">{{ periodLabel(row) }}</template></el-table-column>
-        <el-table-column label="指标名称" min-width="180"><template #default="{ row }"><b>{{ row.indicatorName }}</b></template></el-table-column>
-        <el-table-column v-for="column in dimensionColumns" :key="column" :label="column" min-width="130"><template #default="{ row }">{{ formatValue(row.dimensions[column]) }}</template></el-table-column>
-        <el-table-column v-for="column in resultColumns" :key="column" :label="column" min-width="130" align="right"><template #default="{ row }">{{ formatValue(row.values[column]) }}</template></el-table-column>
+      <el-table :data="tableRows" size="small" max-height="420" class="result-table">
+        <el-table-column label="统计期间" width="190" class-name="result-dimension-shared" label-class-name="result-dimension-shared">
+          <template #header><el-tooltip content="统计期间" placement="top"><span>统计期间</span></el-tooltip></template>
+          <template #default="{ row }">{{ periodLabel(row) }}</template>
+        </el-table-column>
+        <el-table-column
+          v-for="column in dimensionColumns"
+          :key="column"
+          :label="column"
+          :class-name="dimensionClass(column)"
+          :label-class-name="dimensionClass(column)"
+          min-width="130"
+        >
+          <template #header><el-tooltip :content="dimensionOwnerNames(column)" placement="top"><span>{{ column }}</span></el-tooltip></template>
+          <template #default="{ row }">{{ formatValue(row.dimensions[column]) }}</template>
+        </el-table-column>
+        <el-table-column
+          v-for="column in flatMeasureColumns"
+          :key="column.key"
+          :label="column.alias"
+          :class-name="measureClass(column)"
+          :label-class-name="measureClass(column)"
+          min-width="150"
+          align="right"
+        >
+          <template #header><el-tooltip :content="column.indicatorName" placement="top"><span>{{ column.alias }}</span></el-tooltip></template>
+          <template #default="{ row }">{{ formatValue(row.values[column.key]) }}</template>
+        </el-table-column>
       </el-table>
     </el-dialog>
   </div>
@@ -108,9 +154,11 @@ import { api as apiClient, jsonBody } from '../../api'
 import IndicatorTreeNode from '../../components/IndicatorTreeNode.vue'
 import type { BootstrapData, Indicator as IndicatorT, IndicatorOption as IndicatorOptionT, IndicatorTreeNode as TreeNode } from '../../types'
 
-type ResultRow = Record<string, any> & { id: string; indicator_id: string; indicator_name: string; indicator_code: string; data_date: string; result_kind: 'detail' | 'summary'; period_type: 'point' | 'period'; period_start: string; period_end: string; metric_name: string; metric_value: number | null; dimensions: Record<string, unknown>; created_at?: string }
+type ResultRow = { id: string; data_date: string; period_type: 'point' | 'period'; period_start: string; period_end: string; dimensions: Record<string, unknown>; values: Record<string, unknown> }
 type QueryField = { name: string; alias: string; kind: 'dimension' | 'measure' }
-type TableRow = { key: string; dataDate: string; resultKind: 'detail' | 'summary'; periodType: 'point' | 'period'; periodStart: string; periodEnd: string; dimensions: Record<string, unknown>; indicatorName: string; indicatorCode: string; values: Record<string, unknown> }
+type MeasureColumn = { key: string; indicatorId: string; alias: string; indicatorName: string; indicatorCode: string }
+type MeasureGroup = { key: string; label: string; dimensions: string[]; columns: MeasureColumn[] }
+type DimensionOwner = { indicatorId: string; indicatorName: string }
 
 const props = defineProps<{ data: BootstrapData; indicatorId?: string }>()
 const notify = inject<(message: string) => void>('notify', () => undefined)
@@ -123,6 +171,9 @@ const hasMore = ref(false)
 const dimensionFilters = ref<Record<string, string>>({})
 const selectedIds = ref<string[]>(props.indicatorId ? [props.indicatorId] : [])
 const rows = ref<ResultRow[]>([])
+const dimensionColumns = ref<string[]>([])
+const dimensionOwners = ref<Record<string, DimensionOwner[]>>({})
+const measureGroups = ref<MeasureGroup[]>([])
 const loading = ref(false)
 const windowQuery = ref(false)
 const indicatorDetails = ref<Record<string, IndicatorT>>({})
@@ -134,31 +185,12 @@ const selectedIndicators = computed(() => selectedIds.value.map((id) => indicato
 
 const commonFields = computed<QueryField[]>(() => {
   if (!selectedIndicators.value.length) return []
-  const first = fieldList(selectedIndicators.value[0])
-  return first.filter((field) => selectedIndicators.value.every((indicator) => fieldList(indicator).some((candidate) => candidate.name === field.name && candidate.kind === field.kind)))
+  const first = fieldList(selectedIndicators.value[0]).filter((field) => field.kind === 'dimension')
+  return first.filter((field) => selectedIndicators.value.every((indicator) => fieldList(indicator).some((candidate) => candidate.name === field.name && candidate.kind === 'dimension')))
 })
 const commonFilterFields = computed(() => commonFields.value.filter((field) => field.kind === 'dimension' && field.name !== 'DATA_DATE'))
-const dimensionColumns = computed(() => {
-  const commonDimensions = commonFields.value.filter((field) => field.kind === 'dimension' && field.name !== 'DATA_DATE').map((field) => field.alias)
-  const rowDimensions = rows.value.flatMap((row) => Object.keys(row.dimensions || {}))
-  return Array.from(new Set([...commonDimensions, ...rowDimensions]))
-})
-const resultColumns = computed(() => {
-  const aliases = Array.from(new Set(rows.value.map((row) => row.metric_name).filter(Boolean)))
-  const commonMeasures = commonFields.value.filter((field) => field.kind === 'measure').map((field) => field.alias)
-  return commonMeasures.length ? Array.from(new Set([...commonMeasures, ...aliases])) : aliases
-})
-const tableRows = computed<TableRow[]>(() => {
-  const grouped = new Map<string, TableRow>()
-  for (const row of rows.value) {
-    const dimensions = row.dimensions || {}
-    const key = `${row.result_kind}|${row.period_type}|${row.period_start}|${row.period_end}|${row.indicator_code}|${JSON.stringify(dimensions)}`
-    const current = grouped.get(key) || { key, dataDate: row.data_date, resultKind: row.result_kind, periodType: row.period_type, periodStart: row.period_start, periodEnd: row.period_end, dimensions, indicatorName: row.indicator_name, indicatorCode: row.indicator_code, values: {} }
-    current.values[row.metric_name] = row.metric_value
-    grouped.set(key, current)
-  }
-  return [...grouped.values()]
-})
+const tableRows = computed(() => rows.value)
+const flatMeasureColumns = computed(() => measureGroups.value.flatMap((group) => group.columns))
 
 watch(() => props.indicatorId, (id) => { if (id && !selectedIds.value.includes(id)) selectedIds.value.push(id) })
 watch(() => props.data.indicators, () => { selectedIds.value = selectedIds.value.filter((id) => props.data.indicators.some((item) => item.id === id)) })
@@ -202,10 +234,23 @@ function onSelect(id: string, checked: boolean) { const next = new Set(selectedI
 function selectVisible() { const ids = flattenTree(filteredTree.value).filter((node) => node.indicatorId).map((node) => node.indicatorId!); selectedIds.value = [...new Set([...selectedIds.value, ...ids])] }
 function clearSelection() { selectedIds.value = [] }
 function flattenTree(nodes: TreeNode[]): TreeNode[] { return nodes.flatMap((node) => [node, ...flattenTree(node.children)]) }
-function resetQuery() { startDate.value = ''; endDate.value = ''; dimensionFilters.value = {}; page.value = 1; hasMore.value = false; rows.value = [] }
+function resetQuery() { startDate.value = ''; endDate.value = ''; dimensionFilters.value = {}; page.value = 1; hasMore.value = false; rows.value = []; dimensionColumns.value = []; dimensionOwners.value = {}; measureGroups.value = [] }
 function goBack() { window.history.back() }
-function formatValue(value: unknown) { return value === null || value === undefined || value === '' ? '-' : String(value) }
-function periodLabel(row: TableRow) { return row.periodType === 'period' ? `${row.periodStart} 至 ${row.periodEnd}` : row.periodStart || row.dataDate }
+function formatValue(value: unknown) { return value === null || value === undefined || value === '' ? '' : String(value) }
+function periodLabel(row: ResultRow) { return row.period_type === 'period' ? `${row.period_start} 至 ${row.period_end}` : row.period_start || row.data_date }
+function indicatorColorClass(indicatorId: string, kind: 'dimension' | 'measure') {
+  const index = selectedIds.value.indexOf(indicatorId)
+  return index < 0 ? `result-${kind}-shared` : `result-${kind}-owner-${index % 8}`
+}
+function dimensionClass(alias: string) {
+  const owners = dimensionOwners.value[alias] || []
+  return owners.length === 1 ? indicatorColorClass(owners[0].indicatorId, 'dimension') : 'result-dimension-shared'
+}
+function measureClass(column: MeasureColumn) { return indicatorColorClass(column.indicatorId, 'measure') }
+function dimensionOwnerNames(alias: string) {
+  const names = (dimensionOwners.value[alias] || []).map((owner) => owner.indicatorName)
+  return names.length ? `所属指标：${names.join('、')}` : '所属指标信息不可用'
+}
 
 async function loadIndicatorDetails() {
   const missing = selectedIds.value.filter((id) => !indicatorDetails.value[id])
@@ -232,13 +277,16 @@ async function loadResults() {
   try {
     const params = new URLSearchParams()
     params.set('indicatorIds', selectedIds.value.join(','))
-    if (startDate.value) params.set('periodStart', startDate.value)
-    if (endDate.value) params.set('periodEnd', endDate.value)
+    if (startDate.value) params.set('startDate', startDate.value)
+    if (endDate.value) params.set('endDate', endDate.value)
     if (Object.keys(dimensionFilters.value).length) params.set('dimensionFilters', JSON.stringify(dimensionFilters.value))
     params.set('page', String(page.value))
     params.set('pageSize', String(pageSize))
-    const result = await apiClient<{ rows: ResultRow[]; hasMore: boolean }>(`/api/indicator-results?${params.toString()}`)
+    const result = await apiClient<{ rows: ResultRow[]; dimensionColumns: string[]; dimensionOwners: Record<string, DimensionOwner[]>; measureGroups: MeasureGroup[]; hasMore: boolean }>(`/api/indicator-results?${params.toString()}`)
     rows.value = result.rows
+    dimensionColumns.value = result.dimensionColumns
+    dimensionOwners.value = result.dimensionOwners
+    measureGroups.value = result.measureGroups
     hasMore.value = result.hasMore
   } catch (error) { notify(error instanceof Error ? error.message : String(error)) } finally { loading.value = false }
 }
@@ -254,8 +302,13 @@ async function addToFavorites() {
 }
 function exportCsv() {
   if (!tableRows.value.length) return
-  const header = ['统计期间', '指标名称', ...dimensionColumns.value, ...resultColumns.value]
-  const body = tableRows.value.map((row) => [periodLabel(row), row.indicatorName, ...dimensionColumns.value.map((column) => formatValue(row.dimensions[column])), ...resultColumns.value.map((column) => formatValue(row.values[column]))])
+  const measureColumns = measureGroups.value.flatMap((group) => group.columns)
+  const header = ['统计期间', ...dimensionColumns.value, ...measureColumns.map((column) => `${column.indicatorName} · ${column.alias}`)]
+  const body = tableRows.value.map((row) => [
+    periodLabel(row),
+    ...dimensionColumns.value.map((column) => formatValue(row.dimensions[column])),
+    ...measureColumns.map((column) => formatValue(row.values[column.key])),
+  ])
   const csv = [header, ...body].map((line) => line.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\n')
   const blob = new Blob([`﻿${csv}`], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `指标查询_${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url)
@@ -293,4 +346,21 @@ function exportCsv() {
 .iq-result-empty b { color: var(--ink); }
 .iq-loading-mark { color: var(--muted); font-size: 20px; letter-spacing: 3px; }
 .iq-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 10px; }
+.result-table :deep(.result-dimension-shared) { background-color: #f1f3f5; }
+.result-table :deep(.result-dimension-owner-0) { background-color: #eaf2ff; }
+.result-table :deep(.result-measure-owner-0) { background-color: #d7e6ff; }
+.result-table :deep(.result-dimension-owner-1) { background-color: #eaf7ef; }
+.result-table :deep(.result-measure-owner-1) { background-color: #d7f0e0; }
+.result-table :deep(.result-dimension-owner-2) { background-color: #fff4e5; }
+.result-table :deep(.result-measure-owner-2) { background-color: #ffe7c2; }
+.result-table :deep(.result-dimension-owner-3) { background-color: #f4edff; }
+.result-table :deep(.result-measure-owner-3) { background-color: #e7d9ff; }
+.result-table :deep(.result-dimension-owner-4) { background-color: #e5f7f7; }
+.result-table :deep(.result-measure-owner-4) { background-color: #cceeed; }
+.result-table :deep(.result-dimension-owner-5) { background-color: #fff0f0; }
+.result-table :deep(.result-measure-owner-5) { background-color: #ffdcdc; }
+.result-table :deep(.result-dimension-owner-6) { background-color: #f4f6e8; }
+.result-table :deep(.result-measure-owner-6) { background-color: #e8eccb; }
+.result-table :deep(.result-dimension-owner-7) { background-color: #eaf0f4; }
+.result-table :deep(.result-measure-owner-7) { background-color: #d6e2eb; }
 </style>

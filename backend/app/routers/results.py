@@ -21,10 +21,13 @@ def _selected_indicators(indicator_ids: str, db: Session) -> list[Indicator]:
     ids = list(dict.fromkeys(item.strip() for item in indicator_ids.split(",") if item.strip()))
     if not ids:
         return []
-    indicators = db.query(Indicator).filter(Indicator.id.in_(ids)).all()
-    if len(indicators) != len(ids):
+    indicators_by_id = {
+        indicator.id: indicator
+        for indicator in db.query(Indicator).filter(Indicator.id.in_(ids)).all()
+    }
+    if len(indicators_by_id) != len(ids):
         raise HTTPException(400, "存在不存在的指标")
-    return indicators
+    return [indicators_by_id[indicator_id] for indicator_id in ids]
 
 
 def _build_query(
@@ -71,6 +74,7 @@ def _build_query(
     description=(
         "按指定指标、日期范围和维度过滤条件分页查询指标结果。\n\n"
         "支持传入多个指标 ID，按维度筛选过滤结果，并可通过 fieldMap 控制返回字段与展示字段之间的映射。"
+        "返回记录按统计期间和完整维度组合对齐；维度集合不同的指标分别显示，缺少的维度或度量为空。"
     ),
 )
 def query_indicator_results(
@@ -101,12 +105,24 @@ def query_indicator_results(
     """查询指标结果记录，支持指标组合、日期过滤、维度筛选和分页。"""
     indicators = _selected_indicators(indicatorIds, db)
     if not indicators:
-        return {"indicators": [], "rows": [], "page": 1, "pageSize": pageSize, "hasMore": False}
+        return {
+            "indicators": [],
+            "rows": [],
+            "dimensionColumns": [],
+            "dimensionOwners": {},
+            "measureGroups": [],
+            "page": 1,
+            "pageSize": pageSize,
+            "hasMore": False,
+        }
     query = _build_query(startDate, endDate, dimensionFilters, fieldMap, page, pageSize)
     result_page = PhysicalResultQuery(db).fetch(indicators, query)
     return {
         "indicators": [indicator_to_dict(indicator) for indicator in indicators],
         "rows": result_page.rows,
+        "dimensionColumns": result_page.dimension_columns,
+        "dimensionOwners": result_page.dimension_owners,
+        "measureGroups": result_page.measure_groups,
         "page": result_page.page,
         "pageSize": result_page.page_size,
         "hasMore": result_page.has_more,
@@ -118,5 +134,16 @@ def indicator_results(indicator_id: str, db: Session = Depends(get_db)) -> dict:
     indicator = db.get(Indicator, indicator_id)
     if not indicator:
         raise HTTPException(404, "指标不存在")
-    result_page = PhysicalResultQuery(db).fetch([indicator], ResultQuery(page_size=200))
-    return {"indicator": indicator_to_dict(indicator), "rows": result_page.rows, "hasMore": result_page.has_more}
+    result_page = PhysicalResultQuery(db).fetch(
+        [indicator],
+        ResultQuery(page_size=200),
+        combine_rows=False,
+    )
+    return {
+        "indicator": indicator_to_dict(indicator),
+        "rows": result_page.rows,
+        "dimensionColumns": result_page.dimension_columns,
+        "dimensionOwners": result_page.dimension_owners,
+        "measureGroups": result_page.measure_groups,
+        "hasMore": result_page.has_more,
+    }

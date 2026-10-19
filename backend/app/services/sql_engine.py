@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy.orm import Session
 
 from app.entity.models import DataModel, Indicator
+from app.services.result_writer import FIELD_COUNT
 
 
 DERIVATIVE_LABELS = {
@@ -13,7 +14,56 @@ DERIVATIVE_LABELS = {
     "dod_growth": "较上期增幅",
     "cumulative": "累计值",
     "rank_desc": "排名",
+    "prev_day_value": "较上日值",
+    "prev_day_growth": "较上日增幅(%)",
+    "prev_month_value": "较上月值",
+    "prev_month_growth": "较上月增幅(%)",
+    "year_start_comparison_value": "较年初值",
+    "year_start_comparison_growth": "较年初增幅(%)",
+    "prev_year_value": "较去年同期值",
+    "prev_year_growth": "较去年同期增幅(%)",
+    "month_cumulative": "月累计",
+    "quarter_cumulative": "季累计",
+    "year_cumulative": "年累计",
+    "month_average": "月均值",
+    "quarter_average": "季均值",
+    "year_average": "年均值",
+    "month_start_value": "月初值",
+    "quarter_start_value": "季初值",
+    "year_start_value": "年初值",
+    "month_end_value": "月末值",
+    "quarter_end_value": "季末值",
+    "year_end_value": "年末值",
 }
+
+
+DATE_BASED_DERIVATIVES = {
+    "prev_day_value",
+    "prev_day_growth",
+    "prev_month_value",
+    "prev_month_growth",
+    "year_start_comparison_value",
+    "year_start_comparison_growth",
+    "prev_year_value",
+    "prev_year_growth",
+    "month_cumulative",
+    "quarter_cumulative",
+    "year_cumulative",
+    "month_average",
+    "quarter_average",
+    "year_average",
+    "month_start_value",
+    "quarter_start_value",
+    "year_start_value",
+    "month_end_value",
+    "quarter_end_value",
+    "year_end_value",
+}
+
+
+def derivative_alias(measure_alias: str, derivative: str) -> str:
+    return f"{measure_alias}_{DERIVATIVE_LABELS.get(derivative, derivative)}"
+
 
 def quote_alias(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
@@ -47,8 +97,8 @@ def sql_field(name: str, alias: str = "a") -> str:
 
 
 def model_table_expr(model: DataModel) -> str:
-    """数据来源表达式：报表模型用子查询 (source_sql)，普通模型用表名。"""
-    if getattr(model, "source_type", "table") == "report" and model.source_sql:
+    """报表及自定义 SQL 模型用子查询，普通模型使用物理表名。"""
+    if getattr(model, "source_type", "table") in {"report", "custom_sql"} and model.source_sql:
         return f"({model.source_sql})"
     return model.table_name
 
@@ -106,7 +156,14 @@ def result_metric_names(config: dict) -> list[str]:
     if config.get("indicatorType") == "derived":
         names = [(config.get("derived") or {}).get("alias") or "衍生指标值"]
     else:
-        names = [measure.get("alias") or measure["fieldName"] for measure in measures_of(config)]
+        names = []
+        for measure in measures_of(config):
+            alias = measure.get("alias") or measure["fieldName"]
+            names.append(alias)
+            names.extend(
+                derivative_alias(alias, derivative)
+                for derivative in measure.get("derivatives") or []
+            )
     return [name for name in names if name]
 
 
@@ -276,6 +333,25 @@ def generate_indicator_sql(db: Session, config: dict) -> str:
         raise ValueError("指标必须至少包含一个维度")
     if not measures:
         raise ValueError("指标必须至少包含一个度量")
+    requested_derivatives = {
+        derivative
+        for measure in measures
+        for derivative in measure.get("derivatives") or []
+    }
+    unknown_derivatives = requested_derivatives.difference(DERIVATIVE_LABELS)
+    if unknown_derivatives:
+        raise ValueError(f"不支持的衍生度量：{', '.join(sorted(unknown_derivatives))}")
+    if requested_derivatives and (
+        model.source_type not in {"report", "custom_sql"}
+        or model.biz_date_type != "balance"
+        or not model.source_template
+    ):
+        raise ValueError("衍生度量仅适用于配置了业务日期参数的余额类报表模型")
+
+    stored_dimensions = sum(dim.get("fieldName") != "DATA_DATE" for dim in dims)
+    result_columns = stored_dimensions + len(result_metric_names(config))
+    if result_columns > FIELD_COUNT:
+        raise ValueError(f"维度+度量列数超过预留 {FIELD_COUNT} 列上限")
 
     select_dims = [f"  {sql_field(d['fieldName'], alias_of_model(config, str(d.get('modelId') or ''), model_id))} AS {quote_alias(d.get('alias') or d['fieldName'])}" for d in dims]
     group_by = [sql_field(d["fieldName"], alias_of_model(config, str(d.get("modelId") or ""), model_id)) for d in dims]
@@ -312,12 +388,13 @@ def generate_indicator_sql(db: Session, config: dict) -> str:
 
     derivatives: list[str] = []
     date_alias = next((d.get("alias") or d["fieldName"] for d in dims if d["fieldName"] == "DATA_DATE"), None)
-    order = f"ORDER BY {quote_alias(date_alias)}" if date_alias else "ORDER BY 1"
+    order = f"ORDER BY agg.{quote_alias(date_alias)}" if date_alias else "ORDER BY 1"
+
     for measure in measures:
         alias = measure.get("alias") or measure["fieldName"]
         for der in measure.get("derivatives") or []:
-            out = quote_alias(f"{alias}_{DERIVATIVE_LABELS.get(der, der)}")
-            q = quote_alias(alias)
+            out = quote_alias(derivative_alias(alias, der))
+            q = f"agg.{quote_alias(alias)}"
             if der == "cumulative":
                 derivatives.append(f"  SUM({q}) OVER ({order} ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS {out}")
             elif der == "rank_desc":
@@ -326,6 +403,8 @@ def generate_indicator_sql(db: Session, config: dict) -> str:
                 derivatives.append(f"  {q} - LAG({q}) OVER ({order}) AS {out}")
             elif der == "dod_growth":
                 derivatives.append(f"  CASE WHEN LAG({q}) OVER ({order}) = 0 THEN NULL ELSE ({q} - LAG({q}) OVER ({order})) / LAG({q}) OVER ({order}) END AS {out}")
+            elif der in DATE_BASED_DERIVATIVES:
+                continue
 
     if derivatives:
         derivative_sql = ",\n".join(derivatives)

@@ -22,7 +22,7 @@
             <div class="section-title-line"><h3>维度字段</h3><span class="muted">用于分组展示</span></div>
             <div class="check-list field-check-list">
               <el-checkbox-group v-model="dimensionKeys">
-                <el-checkbox v-for="field in dimensionFields" :key="`${field.modelId}:${field.name}`" :value="`${field.modelId}:${field.name}`" class="builder-check-row">
+                <el-checkbox v-for="field in dimensionFields" :key="`${field.modelId}:${field.name}`" :value="dimKey(field.modelId, field.name)" class="builder-check-row">
                   <span>{{ field.alias }}<small class="muted">{{ field.name }} · {{ field.dataType }} · {{ field.source === 'main' ? '主模型' : field.source + ' ' + field.modelName }}</small></span>
                 </el-checkbox>
               </el-checkbox-group>
@@ -40,6 +40,22 @@
               <el-select v-model="measure.aggFunc" placeholder="统计方式"><el-option v-for="agg in ['SUM','AVG','MAX','MIN','COUNT','NONE']" :key="agg" :value="agg" :label="agg" /></el-select>
               <el-input v-model="measure.alias" placeholder="例如：资金余额" />
               <el-button type="danger" link @click="removeMeasure(index)">×</el-button>
+              <div v-if="canConfigureDerivatives" class="measure-derivatives">
+                <div class="measure-derivatives-title">衍生度量配置（可选，与基础度量绑定并随指标一起生成）</div>
+                <small class="muted">运行时按所选业务日期参数查询余额快照；较上日按自然日计算。</small>
+                <div class="derivative-option-group">
+                  <b>业务日期衍生</b>
+                  <el-checkbox-group v-model="measure.derivatives">
+                    <el-checkbox v-for="option in timeDerivatives" :key="option.value" :value="option.value">{{ option.label }}</el-checkbox>
+                  </el-checkbox-group>
+                </div>
+                <div class="derivative-option-group">
+                  <b>统计衍生</b>
+                  <el-checkbox-group v-model="measure.derivatives">
+                    <el-checkbox v-for="option in statisticalDerivatives" :key="option.value" :value="option.value">{{ option.label }}</el-checkbox>
+                  </el-checkbox-group>
+                </div>
+              </div>
             </div>
             <div v-if="!measures.length" class="empty compact-empty">请点击"添加度量"，再选择要统计的数值字段。</div>
             <div class="measure-example"><b>配置示例：</b><span><strong>余额</strong> + <strong>SUM</strong> + <strong>资金余额</strong> = 按维度汇总后的资金余额</span><span><strong>金额</strong> + <strong>AVG</strong> + <strong>平均金额</strong> = 按维度计算平均金额</span></div>
@@ -236,14 +252,18 @@ const filteredModels = computed(() => {
   return props.data.models.filter((m) => (m.name || '').toLowerCase().startsWith(q) || (m.table || '').toLowerCase().startsWith(q))
 })
 const filterModel = (query: string) => { modelQuery.value = query }
-type FieldWithSource = { name: string; alias: string; dataType?: string; modelId: string; modelName: string; source: 'main' | `j${number}`; dictSetId?: number | null }
+type FieldWithSource = { name: string; alias: string; dataType?: string; modelId: string; modelName: string; source: 'main' | `j${number}`; dictSetId?: number | null; isDate?: boolean }
 const dimensionFields = computed<FieldWithSource[]>(() => {
   const main = model.value
   if (!main) return []
   return main.fields.filter((field) => field.role === 'dimension').map((field) => ({
     name: field.name, alias: field.alias, dataType: field.dataType,
-    modelId: main.id, modelName: main.name, source: 'main' as const, dictSetId: field.dictSetId ?? null,
+    modelId: main.id, modelName: main.name, source: 'main' as const, dictSetId: field.dictSetId ?? null, isDate: field.isDate,
   }))
+})
+const canConfigureDerivatives = computed(() => {
+  const sourceType = model.value?.sourceType
+  return (sourceType === 'report' || sourceType === 'custom_sql') && model.value?.bizDateType === 'balance' && !!model.value.sourceTemplate
 })
 const measureFields = computed<FieldWithSource[]>(() => {
   const main = model.value
@@ -254,6 +274,30 @@ const measureFields = computed<FieldWithSource[]>(() => {
   }))
 })
 const filterConfigAvailable = computed(() => indicatorType.value === 'basic')
+const timeDerivatives = [
+  { value: 'prev_day_value', label: '较上日值' },
+  { value: 'prev_day_growth', label: '较上日增幅(%)' },
+  { value: 'prev_month_value', label: '较上月值' },
+  { value: 'prev_month_growth', label: '较上月增幅(%)' },
+  { value: 'year_start_comparison_value', label: '较年初值' },
+  { value: 'year_start_comparison_growth', label: '较年初增幅(%)' },
+  { value: 'prev_year_value', label: '较去年同期值' },
+  { value: 'prev_year_growth', label: '较去年同期增幅(%)' },
+]
+const statisticalDerivatives = [
+  { value: 'month_cumulative', label: '月累计' },
+  { value: 'quarter_cumulative', label: '季累计' },
+  { value: 'year_cumulative', label: '年累计' },
+  { value: 'month_average', label: '月均值' },
+  { value: 'quarter_average', label: '季均值' },
+  { value: 'year_average', label: '年均值' },
+  { value: 'month_start_value', label: '月初值' },
+  { value: 'quarter_start_value', label: '季初值' },
+  { value: 'year_start_value', label: '年初值' },
+  { value: 'month_end_value', label: '月末值' },
+  { value: 'quarter_end_value', label: '季末值' },
+  { value: 'year_end_value', label: '年末值' },
+]
 
 // 度量/筛选切换字段时，自动写入 modelId + 默认 alias
 function onMeasureFieldChange(measure: IndicatorMeasure, fieldName: string) {
@@ -379,7 +423,10 @@ watch(dimensionKeys, (keys) => {
 }, { immediate: true })
 watch(() => props.data.models, () => { if (!measures.value.length) measures.value = defaultMeasures() }, { immediate: true })
 
-function getMeasures(indicator: Indicator): IndicatorMeasure[] { return indicator.config.measures ?? (indicator.config.measure ? [indicator.config.measure] : []) }
+function getMeasures(indicator: Indicator): IndicatorMeasure[] {
+  const configured = indicator.config.measures ?? (indicator.config.measure ? [indicator.config.measure] : [])
+  return configured.map((measure) => ({ ...measure, derivatives: measure.derivatives || [] }))
+}
 function defaultMeasures(): IndicatorMeasure[] { const field = measureFields.value[0]; return field ? [{ fieldName: field.name, alias: field.alias, aggFunc: 'SUM', derivatives: [] }] : [] }
 function addMeasure() { const field = measureFields.value[0]; if (field) measures.value.push({ fieldName: field.name, alias: field.alias, aggFunc: 'SUM', derivatives: [] }) }
 function removeMeasure(index: number) { measures.value.splice(index, 1) }
@@ -401,7 +448,7 @@ function dedupDims(list: IndicatorConfig['dimensions']): IndicatorConfig['dimens
   return result
 }
 function collect(): IndicatorConfig {
-  const config = { modelId: modelId.value, indicatorType: indicatorType.value, dimensions: dedupDims(dimensions.value.map((dim) => ({ fieldName: dim.fieldName, alias: dim.alias, modelId: dim.modelId }))), measures: measures.value.map((m) => ({ ...m, modelId: m.modelId })), filters: filters.value, baseIndicatorIds: baseIndicatorIds.value.filter((id) => id), derived: { operator: derivedOperator.value as 'copy' | 'sum' | 'difference' | 'ratio', alias: name.value || '衍生指标值' }, basic: { bizCaliber: bizCaliber.value }, schedule: { frequency: scheduleFrequency.value, resultTable: resultTable.value } }
+  const config = { modelId: modelId.value, indicatorType: indicatorType.value, dimensions: dedupDims(dimensions.value.map((dim) => ({ fieldName: dim.fieldName, alias: dim.alias, modelId: dim.modelId }))), measures: measures.value.map((m) => ({ ...m, derivatives: m.derivatives || [], modelId: m.modelId })), filters: filters.value, baseIndicatorIds: baseIndicatorIds.value.filter((id) => id), derived: { operator: derivedOperator.value as 'copy' | 'sum' | 'difference' | 'ratio', alias: name.value || '衍生指标值' }, basic: { bizCaliber: bizCaliber.value }, schedule: { frequency: scheduleFrequency.value, resultTable: resultTable.value } }
   return config
 }
 async function preview() { loading.value = true; try { const result = await api<{ sqlText: string }>('/api/sql/previews', { method: 'POST', body: jsonBody({ config: collect() }) }); sqlText.value = result.sqlText } catch (error) { notify(error instanceof Error ? error.message : String(error)) } finally { loading.value = false } }
@@ -423,6 +470,12 @@ function toggleSqlPreview() { showSqlPreview.value = !showSqlPreview.value }
 async function save() {
   if (!name.value.trim()) { notify('请填写指标名称'); return }
   if (!modelId.value && indicatorType.value === 'basic') { notify('请选择数据模型'); return }
+  if (indicatorType.value === 'basic' && measures.value.some((measure) => measure.derivatives?.length)) {
+    if (!canConfigureDerivatives.value) {
+      notify('衍生度量仅适用于配置了业务日期参数的余额类报表模型')
+      return
+    }
+  }
   if (indicatorType.value === 'derived') {
     if (!baseIndicatorIds.value[0]) { notify('请选择基础指标 A'); return }
     if (derivedOperator.value !== 'copy' && !baseIndicatorIds.value[1]) { notify('请选择基础指标 B'); return }
@@ -542,6 +595,39 @@ async function save() {
 
 .measure-config-row {
   grid-template-columns: minmax(0, 1fr) 90px minmax(0, 1fr) 32px;
+}
+
+.measure-derivatives-title,
+.derivative-option-group > b {
+  color: #475d74;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.measure-derivatives {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px;
+  border: 1px solid #dbe8f5;
+  border-radius: 6px;
+  background: #f7fbff;
+}
+
+.derivative-option-group {
+  display: grid;
+  gap: 4px;
+}
+
+.derivative-option-group .el-checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+}
+
+.derivative-option-group :deep(.el-checkbox) {
+  margin-right: 0;
 }
 
 .measure-config-guide {

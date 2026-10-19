@@ -27,7 +27,7 @@ export interface DataModel {
   description?: string
   status: string
   table: string
-  sourceType?: 'table' | 'report'
+  sourceType?: 'table' | 'report' | 'custom_sql'
   sourceSql?: string | null
   sourceRef?: string | null
   sourceTemplate?: string | null

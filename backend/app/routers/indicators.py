@@ -220,6 +220,7 @@ def run_indicator_route(indicator_id: str, payload: RunIn, db: Session = Depends
 
 @router.get("/indicator-categories")
 def list_indicator_categories(db: Session = Depends(get_db)) -> list[dict]:
+    
     rows = db.query(IndicatorCategory).order_by(IndicatorCategory.sort_order, IndicatorCategory.created_at).all()
     return [indicator_category_to_dict(row) for row in rows]
 

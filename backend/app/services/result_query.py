@@ -15,6 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.entity.models import Indicator
+from app.services.sql_engine import result_dimension_names, result_metric_names
 from app.services.result_writer import UNIFIED_TABLE
 
 
@@ -34,23 +35,184 @@ class ResultPage:
     page: int
     page_size: int
     has_more: bool
+    dimension_columns: list[str]
+    dimension_owners: dict[str, list[dict[str, str]]]
+    measure_groups: list[dict[str, Any]]
 
 
 class PhysicalResultQuery:
-    """从统一结果表查询并 pivot 回别名。"""
+    """从统一结果表查询，并按完整维度组合合并多指标结果。"""
 
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def fetch(self, indicators: list[Indicator], query: ResultQuery) -> ResultPage:
-        rows: list[dict[str, Any]] = []
+    def fetch(
+        self,
+        indicators: list[Indicator],
+        query: ResultQuery,
+        combine_rows: bool = True,
+    ) -> ResultPage:
+        """查询所选指标，并可将相同期间、相同维度的记录合并为一行。
+
+        先逐指标读取字段定义和结果，再按完整维度键合并；因此分页必须在
+        合并和排序之后进行，否则不同指标的同一行可能被拆到不同页。
+        combine_rows=False 用于单指标旧接口，保留原始逐指标结果结构。
+        """
+        indicator_rows: list[tuple[Indicator, list[dict[str, Any]], list[str], list[str]]] = []
+        dimension_columns: set[str] = set()
+        dimension_owners: dict[str, list[dict[str, str]]] = {}
+        measure_groups: dict[tuple[str, ...], dict[str, Any]] = {}
+
+        # 收集每个指标实际落库的维度、度量别名，并按指标自己的 field map 读取物理结果。
         for indicator in indicators:
-            rows.extend(self._fetch_indicator(indicator, query))
+            field_map = self._field_map(indicator, query)
+            if not field_map:
+                continue
+            config = json.loads(indicator.config_json)
+            dimensions = [
+                alias for alias in result_dimension_names(config, self.db)
+                if alias != "DATA_DATE" and alias in field_map
+            ]
+            measures = [
+                alias for alias in result_metric_names(config)
+                if alias in field_map
+            ]
+            dimensions = list(dict.fromkeys(dimensions))
+            measures = list(dict.fromkeys(measures))
+            dimension_columns.update(dimensions)
+            for alias in dimensions:
+                owners = dimension_owners.setdefault(alias, [])
+                if not any(owner["indicatorId"] == indicator.id for owner in owners):
+                    owners.append({
+                        "indicatorId": indicator.id,
+                        "indicatorName": indicator.name,
+                    })
+            group_key = tuple(sorted(dimensions))
+            group = measure_groups.setdefault(group_key, {
+                "key": json.dumps(group_key, ensure_ascii=False),
+                "label": " / ".join(group_key) if group_key else "无维度",
+                "dimensions": list(group_key),
+                "columns": [],
+            })
+            group["columns"].extend({
+                "key": self._measure_key(indicator.id, alias),
+                "indicatorId": indicator.id,
+                "alias": alias,
+                "indicatorName": indicator.name,
+                "indicatorCode": indicator.code,
+            } for alias in measures)
+            indicator_rows.append((
+                indicator,
+                self._fetch_indicator(indicator, query, field_map),
+                dimensions,
+                measures,
+            ))
+
+        # 单指标详情接口沿用原有返回格式，不执行跨指标宽表合并。
+        if not combine_rows:
+            raw_rows = [
+                row
+                for _, rows, _, _ in indicator_rows
+                for row in rows
+            ]
+            start = (query.page - 1) * query.page_size
+            end = start + query.page_size
+            return ResultPage(
+                rows=raw_rows[start:end],
+                page=query.page,
+                page_size=query.page_size,
+                has_more=len(raw_rows) > end,
+                dimension_columns=sorted(dimension_columns),
+                dimension_owners=dimension_owners,
+                measure_groups=[
+                    measure_groups[group_key]
+                    for group_key in sorted(measure_groups)
+                ],
+            )
+
+        # 维度列是所有指标维度的并集。每条记录用“期间 + 所有维度值”作为键；
+        # 某指标缺少某维度时该值为空，因此不同粒度的记录不会被错误合并。
+        ordered_dimensions = sorted(dimension_columns)
+        rows_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
+        for indicator, rows, dimensions, measures in indicator_rows:
+            for row in rows:
+                dimension_values = {
+                    alias: row["values"].get(alias)
+                    if row["values"].get(alias) is not None else ""
+                    for alias in dimensions
+                }
+                # Missing dimensions remain blank and are part of the key, so finer-grained
+                # results are not accidentally joined to coarser-grained results.
+                key_dimensions = tuple(
+                    (
+                        alias,
+                        "" if dimension_values.get(alias) is None
+                        else str(dimension_values[alias]),
+                    )
+                    for alias in ordered_dimensions
+                )
+                key = (
+                    row["period_type"],
+                    row["period_start"],
+                    row["period_end"],
+                    key_dimensions,
+                )
+                current = rows_by_key.get(key)
+                if current is None:
+                    current = {
+                        "id": json.dumps(key, ensure_ascii=False, default=str),
+                        "period_type": row["period_type"],
+                        "data_date": row["data_date"],
+                        "period_start": row["period_start"],
+                        "period_end": row["period_end"],
+                        "dimensions": {
+                            alias: dimension_values.get(alias, "")
+                            for alias in ordered_dimensions
+                        },
+                        "values": {},
+                    }
+                    rows_by_key[key] = current
+                for alias in measures:
+                    # 指标 ID 纳入度量键，避免不同指标使用同名度量别名时互相覆盖。
+                    measure_key = self._measure_key(indicator.id, alias)
+                    if measure_key not in current["values"]:
+                        current["values"][measure_key] = row["values"].get(alias)
+
+        # 固定排序后再分页，保证翻页稳定且分页单位是合并后的展示行。
+        rows = sorted(
+            rows_by_key.values(),
+            key=lambda row: (
+                tuple(
+                    "" if row["dimensions"].get(alias) is None
+                    else str(row["dimensions"][alias])
+                    for alias in ordered_dimensions
+                ),
+                row["period_start"],
+                row["period_end"],
+                row["period_type"],
+            ),
+        )
         start = (query.page - 1) * query.page_size
         end = start + query.page_size
-        return ResultPage(rows=rows[start:end], page=query.page, page_size=query.page_size, has_more=len(rows) > end)
+        return ResultPage(
+            rows=rows[start:end],
+            page=query.page,
+            page_size=query.page_size,
+            has_more=len(rows) > end,
+            dimension_columns=ordered_dimensions,
+            dimension_owners=dimension_owners,
+            measure_groups=[
+                measure_groups[group_key]
+                for group_key in sorted(measure_groups)
+            ],
+        )
 
-    def _fetch_indicator(self, indicator: Indicator, query: ResultQuery) -> list[dict[str, Any]]:
+    @staticmethod
+    def _measure_key(indicator_id: str, alias: str) -> str:
+        return f"{indicator_id}::{alias}"
+
+    @staticmethod
+    def _field_map(indicator: Indicator, query: ResultQuery) -> dict[str, str]:
         # fieldMap：前端传优先，否则回退读 indicator.field_map_json
         field_map = query.field_map
         if not field_map and indicator.field_map_json:
@@ -58,9 +220,15 @@ class PhysicalResultQuery:
                 field_map = json.loads(indicator.field_map_json)
             except (json.JSONDecodeError, TypeError):
                 field_map = {}
-        if not field_map:
-            return []
+        return field_map or {}
 
+    def _fetch_indicator(
+        self,
+        indicator: Indicator,
+        query: ResultQuery,
+        field_map: dict[str, str],
+    ) -> list[dict[str, Any]]:
+        """按指标的字段映射读取物理列，并转换为别名形式的 API 记录。"""
         period_type = (indicator.period_type or "point").lower()
         field_cols = sorted(set(field_map.values()), key=lambda f: int(f[5:]))
 
@@ -149,7 +317,7 @@ class PhysicalResultQuery:
             # pivot：FIELD列 → 别名
             values: dict[str, Any] = {}
             for alias, field_col in field_map.items():
-                values[alias] = row_dict.get(field_col.lower())
+                values[alias] = row_dict.get(field_col, row_dict.get(field_col.lower()))
             result.append({
                 "id": f"{indicator.code}:{run_id}:{single_date}",
                 "indicator_code": indicator.code,
@@ -160,6 +328,7 @@ class PhysicalResultQuery:
                 "data_date": single_date,
                 "period_start": biz_start or single_date,
                 "period_end": biz_end or single_date,
+                "period_type": period_type,
                 "values": values,
             })
         return result
