@@ -77,7 +77,6 @@
           <div v-else-if="!tableRows.length" class="iq-result-empty"><b>{{ selectedIds.length ? '暂无查询结果' : '请先选择指标' }}</b><span>{{ selectedIds.length ? '调整日期或查询条件后重试' : '从左侧指标树勾选一个或多个指标' }}</span></div>
           <el-table v-else :data="tableRows" size="small" class="result-table">
             <el-table-column label="统计期间" width="190" class-name="result-dimension-shared" label-class-name="result-dimension-shared">
-              <template #header><el-tooltip content="统计期间" placement="top"><span>统计期间</span></el-tooltip></template>
               <template #default="{ row }">{{ periodLabel(row) }}</template>
             </el-table-column>
             <el-table-column
@@ -88,7 +87,7 @@
               :label-class-name="dimensionClass(column)"
               min-width="130"
             >
-              <template #header><el-tooltip :content="dimensionOwnerNames(column)" placement="top"><span>{{ column }}</span></el-tooltip></template>
+              <template #header>{{ column }}</template>
               <template #default="{ row }">{{ formatValue(row.dimensions[column]) }}</template>
             </el-table-column>
             <el-table-column
@@ -100,7 +99,7 @@
               min-width="150"
               align="right"
             >
-              <template #header><el-tooltip :content="column.indicatorName" placement="top"><span>{{ column.alias }}</span></el-tooltip></template>
+              <template #header>{{ column.alias }}</template>
               <template #default="{ row }">{{ formatValue(row.values[column.key]) }}</template>
             </el-table-column>
           </el-table>
@@ -117,7 +116,6 @@
       <div class="muted">已选 {{ selectedIds.length }} 个指标 · {{ tableRows.length }} 行结果</div>
       <el-table :data="tableRows" size="small" max-height="420" class="result-table">
         <el-table-column label="统计期间" width="190" class-name="result-dimension-shared" label-class-name="result-dimension-shared">
-          <template #header><el-tooltip content="统计期间" placement="top"><span>统计期间</span></el-tooltip></template>
           <template #default="{ row }">{{ periodLabel(row) }}</template>
         </el-table-column>
         <el-table-column
@@ -128,7 +126,7 @@
           :label-class-name="dimensionClass(column)"
           min-width="130"
         >
-          <template #header><el-tooltip :content="dimensionOwnerNames(column)" placement="top"><span>{{ column }}</span></el-tooltip></template>
+          <template #header>{{ column }}</template>
           <template #default="{ row }">{{ formatValue(row.dimensions[column]) }}</template>
         </el-table-column>
         <el-table-column
@@ -140,7 +138,7 @@
           min-width="150"
           align="right"
         >
-          <template #header><el-tooltip :content="column.indicatorName" placement="top"><span>{{ column.alias }}</span></el-tooltip></template>
+          <template #header>{{ column.alias }}</template>
           <template #default="{ row }">{{ formatValue(row.values[column.key]) }}</template>
         </el-table-column>
       </el-table>
@@ -154,7 +152,8 @@ import { api as apiClient, jsonBody } from '../../api'
 import IndicatorTreeNode from '../../components/IndicatorTreeNode.vue'
 import type { BootstrapData, Indicator as IndicatorT, IndicatorOption as IndicatorOptionT, IndicatorTreeNode as TreeNode } from '../../types'
 
-type ResultRow = { id: string; data_date: string; period_type: 'point' | 'period'; period_start: string; period_end: string; dimensions: Record<string, unknown>; values: Record<string, unknown> }
+type BusinessParameter = { indicator_id: string; indicator_name: string; values: Record<string, string> }
+type ResultRow = { id: string; data_date: string; business_time?: string | null; period_type: 'point' | 'period'; period_start: string; period_end: string; business_params: BusinessParameter[]; dimensions: Record<string, unknown>; values: Record<string, unknown> }
 type QueryField = { name: string; alias: string; kind: 'dimension' | 'measure' }
 type MeasureColumn = { key: string; indicatorId: string; alias: string; indicatorName: string; indicatorCode: string }
 type MeasureGroup = { key: string; label: string; dimensions: string[]; columns: MeasureColumn[] }
@@ -237,7 +236,10 @@ function flattenTree(nodes: TreeNode[]): TreeNode[] { return nodes.flatMap((node
 function resetQuery() { startDate.value = ''; endDate.value = ''; dimensionFilters.value = {}; page.value = 1; hasMore.value = false; rows.value = []; dimensionColumns.value = []; dimensionOwners.value = {}; measureGroups.value = [] }
 function goBack() { window.history.back() }
 function formatValue(value: unknown) { return value === null || value === undefined || value === '' ? '' : String(value) }
-function periodLabel(row: ResultRow) { return row.period_type === 'period' ? `${row.period_start} 至 ${row.period_end}` : row.period_start || row.data_date }
+function periodLabel(row: ResultRow) {
+  if (row.business_time) return row.business_time
+  return row.period_type === 'period' ? `${row.period_start} 至 ${row.period_end}` : row.period_start || row.data_date
+}
 function indicatorColorClass(indicatorId: string, kind: 'dimension' | 'measure') {
   const index = selectedIds.value.indexOf(indicatorId)
   return index < 0 ? `result-${kind}-shared` : `result-${kind}-owner-${index % 8}`
@@ -247,11 +249,6 @@ function dimensionClass(alias: string) {
   return owners.length === 1 ? indicatorColorClass(owners[0].indicatorId, 'dimension') : 'result-dimension-shared'
 }
 function measureClass(column: MeasureColumn) { return indicatorColorClass(column.indicatorId, 'measure') }
-function dimensionOwnerNames(alias: string) {
-  const names = (dimensionOwners.value[alias] || []).map((owner) => owner.indicatorName)
-  return names.length ? `所属指标：${names.join('、')}` : '所属指标信息不可用'
-}
-
 async function loadIndicatorDetails() {
   const missing = selectedIds.value.filter((id) => !indicatorDetails.value[id])
   if (!missing.length) return

@@ -348,10 +348,13 @@ def generate_indicator_sql(db: Session, config: dict) -> str:
     ):
         raise ValueError("衍生度量仅适用于配置了业务日期参数的余额类报表模型")
 
-    stored_dimensions = sum(dim.get("fieldName") != "DATA_DATE" for dim in dims)
+    stored_dimensions = sum(
+        dim.get("fieldName") != "DATA_DATE" and not dim.get("isBusinessTime")
+        for dim in dims
+    )
     result_columns = stored_dimensions + len(result_metric_names(config))
     if result_columns > FIELD_COUNT:
-        raise ValueError(f"维度+度量列数超过预留 {FIELD_COUNT} 列上限")
+        raise ValueError(f"业务时间、维度和度量列数超过预留 {FIELD_COUNT} 列上限")
 
     select_dims = [f"  {sql_field(d['fieldName'], alias_of_model(config, str(d.get('modelId') or ''), model_id))} AS {quote_alias(d.get('alias') or d['fieldName'])}" for d in dims]
     group_by = [sql_field(d["fieldName"], alias_of_model(config, str(d.get("modelId") or ""), model_id)) for d in dims]

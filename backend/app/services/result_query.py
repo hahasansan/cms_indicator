@@ -1,7 +1,7 @@
 """统一结果表 T_IND_RESULT 查询。
 
 JOIN job_runs 一步查询：T_IND_RESULT r ⋈ job_runs j ON r.RUN_ID = j.id
-- 按 indicator_code + 业务日期范围过滤（period_type 决定用 single_date 还是 business_start/end_date）
+- 按指标实际业务时间过滤，新结果缺失业务时间时回退到跑批日期范围
 - fieldMap 由前端传入（别名→FIELD列名），应用层 pivot 回别名
 - 未传时回退读 indicator.field_map_json
 """
@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.entity.models import Indicator
+from app.entity.models import DataModel, Indicator
 from app.services.sql_engine import result_dimension_names, result_metric_names
 from app.services.result_writer import UNIFIED_TABLE
 
@@ -153,8 +153,11 @@ class PhysicalResultQuery:
                 )
                 key = (
                     row["period_type"],
-                    row["period_start"],
-                    row["period_end"],
+                    (
+                        ("business_time", row["business_time"])
+                        if row.get("business_time")
+                        else ("period", row["period_start"], row["period_end"])
+                    ),
                     key_dimensions,
                 )
                 current = rows_by_key.get(key)
@@ -163,8 +166,10 @@ class PhysicalResultQuery:
                         "id": json.dumps(key, ensure_ascii=False, default=str),
                         "period_type": row["period_type"],
                         "data_date": row["data_date"],
+                        "business_time": row.get("business_time"),
                         "period_start": row["period_start"],
                         "period_end": row["period_end"],
+                        "business_params": [],
                         "dimensions": {
                             alias: dimension_values.get(alias, "")
                             for alias in ordered_dimensions
@@ -172,6 +177,12 @@ class PhysicalResultQuery:
                         "values": {},
                     }
                     rows_by_key[key] = current
+                for business_params in row.get("business_params") or []:
+                    if not any(
+                        item["indicator_id"] == business_params["indicator_id"]
+                        for item in current["business_params"]
+                    ):
+                        current["business_params"].append(business_params)
                 for alias in measures:
                     # 指标 ID 纳入度量键，避免不同指标使用同名度量别名时互相覆盖。
                     measure_key = self._measure_key(indicator.id, alias)
@@ -187,6 +198,7 @@ class PhysicalResultQuery:
                     else str(row["dimensions"][alias])
                     for alias in ordered_dimensions
                 ),
+                row.get("business_time") or row["period_start"],
                 row["period_start"],
                 row["period_end"],
                 row["period_type"],
@@ -236,10 +248,17 @@ class PhysicalResultQuery:
             "indicator_code": indicator.code,
             "indicator_id": indicator.id,
         }
-        date_cond = self._date_condition(period_type, query, params)
+        model = self.db.get(DataModel, indicator.model_id) if indicator.model_id else None
+        date_cond = self._date_condition(
+            period_type,
+            query,
+            params,
+            use_business_time=bool(model and model.biz_date_field),
+        )
 
         select_parts = [f'r."{c}" AS "{c}"' for c in field_cols]
         select_parts.extend([
+            'r."BUSINESS_TIME" AS "business_time"',
             'r."RUN_ID" AS "RUN_ID"',
             'j."SINGLE_DATE" AS "single_date"',
             'j."BUSINESS_START_DATE" AS "business_start_date"',
@@ -266,15 +285,52 @@ class PhysicalResultQuery:
         sql += ' ORDER BY j."STARTED_AT" DESC'
 
         physical_rows = self.db.execute(text(sql), params).mappings().all()
-        return self._to_api_rows(indicator, physical_rows, field_map, period_type)
+        parameter_names = (
+            {
+                "type": model.biz_date_type,
+                "start": model.biz_date_start_param,
+                "end": model.biz_date_end_param,
+            }
+            if model else {}
+        )
+        return self._to_api_rows(indicator, physical_rows, field_map, period_type, parameter_names)
 
     @staticmethod
-    def _date_condition(period_type: str, query: ResultQuery, params: dict[str, Any]) -> str:
+    def _date_condition(
+        period_type: str,
+        query: ResultQuery,
+        params: dict[str, Any],
+        use_business_time: bool = False,
+    ) -> str:
         """按 period_type 构建业务日期过滤条件。
 
-        point：single_date 落在 [start, end] 内
-        period：结果期间完整覆盖查询区间（business_start <= start AND business_end >= end）
+        新结果按业务时间字段值过滤；历史结果回退使用跑批日期。
         """
+        if use_business_time and (query.start_date or query.end_date):
+            date_value = """SUBSTR(REPLACE(REPLACE(CAST(r."BUSINESS_TIME" AS VARCHAR(255)), '-', ''), '/', ''), 1, 8)"""
+            business_cond = ""
+            if query.start_date:
+                business_cond += f" AND {date_value} >= :business_start"
+                params["business_start"] = query.start_date.replace("-", "")
+            if query.end_date:
+                business_cond += f" AND {date_value} <= :business_end"
+                params["business_end"] = query.end_date.replace("-", "")
+            legacy_cond = PhysicalResultQuery._legacy_date_condition(period_type, query, params)
+            if legacy_cond:
+                return (
+                    'AND ((NULLIF(r."BUSINESS_TIME", \'\') IS NOT NULL'
+                    f"{business_cond}) OR (NULLIF(r.\"BUSINESS_TIME\", '') IS NULL "
+                    f"AND {legacy_cond[4:]}))"
+                )
+            return f'AND NULLIF(r."BUSINESS_TIME", \'\') IS NOT NULL{business_cond}'
+        return PhysicalResultQuery._legacy_date_condition(period_type, query, params)
+
+    @staticmethod
+    def _legacy_date_condition(
+        period_type: str,
+        query: ResultQuery,
+        params: dict[str, Any],
+    ) -> str:
         cond = ""
         if period_type == "period":
             if query.start_date and query.end_date:
@@ -306,6 +362,7 @@ class PhysicalResultQuery:
         physical_rows: list[Any],
         field_map: dict[str, str],
         period_type: str,
+        parameter_names: dict[str, str | None],
     ) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
         for row in physical_rows:
@@ -314,21 +371,40 @@ class PhysicalResultQuery:
             single_date = str(row_dict.get("single_date") or "")
             biz_start = str(row_dict.get("business_start_date") or "")
             biz_end = str(row_dict.get("business_end_date") or "")
+            business_time_value = row_dict.get("business_time")
+            business_time = str(business_time_value) if business_time_value not in (None, "") else None
+            parameter_values: dict[str, str] = {}
+            if parameter_names.get("type") == "period":
+                start_param = parameter_names.get("start")
+                end_param = parameter_names.get("end")
+                if start_param and biz_start:
+                    parameter_values[start_param] = biz_start.replace("-", "")
+                if end_param and biz_end:
+                    parameter_values[end_param] = biz_end.replace("-", "")
+            elif parameter_names.get("type") == "balance":
+                single_param = parameter_names.get("start")
+                if single_param and single_date:
+                    parameter_values[single_param] = single_date.replace("-", "")
             # pivot：FIELD列 → 别名
             values: dict[str, Any] = {}
             for alias, field_col in field_map.items():
                 values[alias] = row_dict.get(field_col, row_dict.get(field_col.lower()))
             result.append({
-                "id": f"{indicator.code}:{run_id}:{single_date}",
+                "id": f"{indicator.code}:{run_id}:{business_time or single_date}",
                 "indicator_code": indicator.code,
                 "indicator_id": indicator.id,
                 "indicator_name": indicator.name,
                 "run_id": run_id,
                 "period_type": period_type,
                 "data_date": single_date,
+                "business_time": business_time,
                 "period_start": biz_start or single_date,
                 "period_end": biz_end or single_date,
-                "period_type": period_type,
+                "business_params": [{
+                    "indicator_id": indicator.id,
+                    "indicator_name": indicator.name,
+                    "values": parameter_values,
+                }] if parameter_values else [],
                 "values": values,
             })
         return result

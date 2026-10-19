@@ -8,7 +8,7 @@ from fastapi import Depends, HTTPException, APIRouter, Query
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
-from app.entity.models import Indicator, IndicatorCategory, IndicatorVersion
+from app.entity.models import DataModel, Indicator, IndicatorCategory, IndicatorVersion
 from app.routers.deps import build_indicator_sql
 from app.entity.schemas import FavoriteIn, IndicatorCategoryIn, IndicatorIn, RunIn
 from app.utils.database import get_db
@@ -119,7 +119,9 @@ def create_indicator(payload: IndicatorIn, db: Session = Depends(get_db)) -> dic
     _check_parent(db, payload.parentId or "")
     code = _next_indicator_code(db)
     sql_text = build_indicator_sql(db, payload.config)
-    ind = Indicator(id=new_id("ind"), code=code, name=payload.name, model_id=payload.modelId or None, parent_id=payload.parentId or None, category_id=payload.categoryId, status=payload.status, config_json=json.dumps(payload.config, ensure_ascii=False), sql_text=sql_text)
+    model = db.get(DataModel, payload.modelId) if payload.modelId else None
+    period_type = "period" if model and model.biz_date_type == "period" else "point"
+    ind = Indicator(id=new_id("ind"), code=code, name=payload.name, model_id=payload.modelId or None, parent_id=payload.parentId or None, category_id=payload.categoryId, status=payload.status, period_type=period_type, config_json=json.dumps(payload.config, ensure_ascii=False), sql_text=sql_text)
     db.add(ind)
     db.add(IndicatorVersion(indicator_id=ind.id, version=1, config_json=ind.config_json, sql_text=sql_text))
     db.commit()
@@ -144,6 +146,8 @@ def update_indicator(indicator_id: str, payload: IndicatorIn, db: Session = Depe
     ind.parent_id = parent_id
     ind.status = payload.status
     ind.category_id = payload.categoryId
+    model = db.get(DataModel, payload.modelId) if payload.modelId else None
+    ind.period_type = "period" if model and model.biz_date_type == "period" else "point"
     ind.config_json = json.dumps(payload.config, ensure_ascii=False)
     ind.sql_text = build_indicator_sql(db, payload.config)
     ind.updated_at = datetime.now()

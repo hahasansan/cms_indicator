@@ -1,7 +1,7 @@
 """unified result table T_IND_RESULT
 
 - DROP 旧表 T_IND_RESULT_D / T_IND_RESULT_M（历史数据丢失，已确认接受）
-- CREATE 统一表 T_IND_RESULT（极简：RESULT_ID + INDICATOR_CODE + RUN_ID + FIELD1..25）
+- CREATE 统一表 T_IND_RESULT（RESULT_ID + INDICATOR_CODE + RUN_ID + BUSINESS_TIME + FIELD1..25）
 - job_runs.run_date 改名 single_date，加索引
 - indicators 加 field_map_json CLOB 字段
 - 清理 result_tables 元数据，登记 T_IND_RESULT
@@ -47,6 +47,7 @@ def upgrade() -> None:
             '"RESULT_ID" VARCHAR(64) NOT NULL,'
             '"INDICATOR_CODE" VARCHAR(64) NOT NULL,'
             '"RUN_ID" VARCHAR(64),'
+            '"BUSINESS_TIME" VARCHAR(255),'
             + ''.join(f'"FIELD{i}" VARCHAR(255),' for i in range(1, 26))
             + 'CONSTRAINT "PK_IND_RESULT" PRIMARY KEY("RESULT_ID"))'
         ))

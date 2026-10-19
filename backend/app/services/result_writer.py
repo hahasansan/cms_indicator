@@ -1,8 +1,8 @@
 """统一结果表 T_IND_RESULT 物理落库。
 
 契约：
-- 固定表 T_IND_RESULT：RESULT_ID + INDICATOR_CODE + RUN_ID + FIELD1..FIELD25 (VARCHAR(255))
-- 维度别名按序占 FIELD1..，度量别名按序占后续 FIELD 列，全部以字符串存储
+- 固定表 T_IND_RESULT：RESULT_ID + INDICATOR_CODE + RUN_ID + BUSINESS_TIME + FIELD1..FIELD25
+- BUSINESS_TIME 保存 SQL 业务日期字段的结果值；FIELD1..FIELD25 保存维度和度量
 - field_map_json（别名→FIELD列名 映射）存于 indicators 表，不在结果表
 - 重算语义：按 RUN_ID 删除旧行后插入新行
 
@@ -41,11 +41,16 @@ def build_field_map(dim_aliases: list[str], metric_aliases: list[str]) -> dict[s
     return field_map
 
 
-def rows_to_wide(rows: list[dict], field_map: dict[str, str]) -> list[dict]:
+def rows_to_wide(
+    rows: list[dict],
+    field_map: dict[str, str],
+    business_time_alias: str | None = None,
+) -> list[dict]:
     """原始查询行 → 统一表 FIELD 列宽行，全部转字符串。"""
     wide: list[dict] = []
     for row in rows:
-        item: dict = {}
+        business_time = row.get(business_time_alias) if business_time_alias else None
+        item: dict = {"BUSINESS_TIME": "" if business_time is None else str(business_time)}
         for alias, field_col in field_map.items():
             value = row.get(alias)
             item[field_col] = "" if value is None else str(value)
@@ -70,11 +75,14 @@ def write_results(
 
     # 收集所有出现的 FIELD 列（有序）
     field_cols = sorted(
-        {key for row in wide_rows for key in row},
+        {
+            key for row in wide_rows for key in row
+            if key.startswith("FIELD") and key[5:].isdigit()
+        },
         key=lambda f: int(f[5:]),
     )
-    columns = ['"RESULT_ID"', '"INDICATOR_CODE"', '"RUN_ID"'] + [f'"{c}"' for c in field_cols]
-    param_keys = ['result_id', 'code', 'run_id'] + [c.lower() for c in field_cols]
+    columns = ['"RESULT_ID"', '"INDICATOR_CODE"', '"RUN_ID"', '"BUSINESS_TIME"'] + [f'"{c}"' for c in field_cols]
+    param_keys = ['result_id', 'code', 'run_id', 'business_time'] + [c.lower() for c in field_cols]
     statement = text(
         f'INSERT INTO "{UNIFIED_TABLE}" ({", ".join(columns)}) '
         f'VALUES ({", ".join(f":{k}" for k in param_keys)})'
@@ -84,6 +92,7 @@ def write_results(
             "result_id": new_id("res"),
             "code": indicator_code,
             "run_id": run_id,
+            "business_time": row.get("BUSINESS_TIME", ""),
         }
         for col in field_cols:
             params[col.lower()] = row.get(col, "")

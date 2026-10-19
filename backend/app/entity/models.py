@@ -16,7 +16,7 @@ class DataModel(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     module: Mapped[str] = mapped_column(String(64), default="未分类")
     table_name: Mapped[str] = mapped_column(String(128), nullable=False)
-    owner: Mapped[str] = mapped_column(String(64), default="当前用户")
+    owner: Mapped[str] = mapped_column(String(64), default ="当前用户")
     description: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), default="enabled")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)

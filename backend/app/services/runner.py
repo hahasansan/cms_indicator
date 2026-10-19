@@ -32,6 +32,62 @@ from app.utils.common import new_id
 
 logger = get_logger("runner")
 
+BUSINESS_TIME_ALIAS = "__BUSINESS_TIME"
+
+
+def _add_business_time_dimension(
+    indicator_config: dict,
+    model: DataModel | None,
+) -> str | None:
+    """Ensure the SQL result includes the model's time-filter field as a hidden dimension."""
+    if (
+        not model
+        or not model.biz_date_field
+        or indicator_config.get("indicatorType") == "derived"
+    ):
+        return None
+
+    field_name = model.biz_date_field.rsplit(".", 1)[-1].strip('"`')
+    model_field = next(
+        (field for field in model.fields if field.field_name.casefold() == field_name.casefold()),
+        None,
+    )
+    if not model_field:
+        raise HTTPException(
+            400,
+            f"业务时间字段“{model.biz_date_field}”未包含在数据模型 SQL 输出字段中",
+        )
+
+    dimensions = indicator_config.setdefault("dimensions", [])
+    existing = next(
+        (
+            item for item in dimensions
+            if (not item.get("modelId") or item.get("modelId") == model.id)
+            and str(item.get("fieldName") or "").casefold() == model_field.field_name.casefold()
+        ),
+        None,
+    )
+    if existing:
+        existing["isBusinessTime"] = True
+        return existing.get("alias") or existing["fieldName"]
+
+    alias = BUSINESS_TIME_ALIAS
+    used_aliases = {
+        str(item.get("alias") or item.get("fieldName") or "").casefold()
+        for item in dimensions
+    }
+    suffix = 1
+    while alias.casefold() in used_aliases:
+        alias = f"{BUSINESS_TIME_ALIAS}_{suffix}"
+        suffix += 1
+    dimensions.append({
+        "modelId": model.id,
+        "fieldName": model_field.field_name,
+        "alias": alias,
+        "isBusinessTime": True,
+    })
+    return alias
+
 
 def _shift_months(value: date, months: int) -> date | None:
     month_index = value.year * 12 + value.month - 1 + months
@@ -235,15 +291,21 @@ def run_indicator(indicator_id: str, payload: RunIn, db: Session) -> dict:
     if not ind:
         raise HTTPException(404, "指标不存在")
     sql_text = ind.sql_text
-    period_type = (ind.period_type or "point").lower()
+    model = db.get(DataModel, ind.model_id) if ind.model_id else None
+    if model and model.biz_date_type == "period":
+        period_type = "period"
+    elif model and model.biz_date_type == "balance":
+        period_type = "point"
+    else:
+        period_type = (ind.period_type or "point").lower()
     indicator_config = json.loads(ind.config_json)
+    business_time_alias = _add_business_time_dimension(indicator_config, model)
     date_derivatives = {
         derivative
         for measure in measures_of(indicator_config)
         for derivative in measure.get("derivatives") or []
         if derivative in DATE_BASED_DERIVATIVES
     }
-    model = db.get(DataModel, ind.model_id) if ind.model_id else None
     if date_derivatives and not payload.dateOption:
         raise HTTPException(400, "余额类衍生度量运行时必须指定业务日期")
     if date_derivatives and (
@@ -255,6 +317,9 @@ def run_indicator(indicator_id: str, payload: RunIn, db: Session) -> dict:
         raise HTTPException(400, "衍生度量仅适用于配置了业务日期参数的余额类报表模型")
     biz_dates: dict[str, str] = resolve_biz_dates(payload.dateOption) if payload.dateOption else {}
     # 报表及自定义 SQL 模型：按业务日期选项代入模板参数
+    if model and model.biz_date_type == "period" and model.source_template and not payload.dateOption:
+        raise HTTPException(400, "时段类模型运行时必须提供开始日期和结束日期")
+    sql_regenerated = False
     if payload.dateOption and model:
         if model.source_type in {"report", "custom_sql"} and model.source_template:
             # 跑批前校验 biz_date 参数完整性：避免配错时报表 SQL 残留 :xxx 占位符
@@ -262,11 +327,17 @@ def run_indicator(indicator_id: str, payload: RunIn, db: Session) -> dict:
                 raise HTTPException(400, "余额类报表未配置业务日期参数，无法按日期跑批")
             if model.biz_date_type == "period" and not (model.biz_date_start_param and model.biz_date_end_param):
                 raise HTTPException(400, "时段类报表未完整配置起止业务日期参数，无法按日期跑批")
-            # 选项类型与指标模型类型不一致时兜底：余额类取 end 作为单日；时段类用 single 作起止
-            if model.biz_date_type == "balance" and "single" not in biz_dates and biz_dates.get("end"):
-                biz_dates = {"single": biz_dates["end"]}
-            elif model.biz_date_type == "period" and "start" not in biz_dates and biz_dates.get("single"):
-                biz_dates = {"start": biz_dates["single"], "end": biz_dates["single"]}
+            date_option_type = payload.dateOption.get("type")
+            if model.biz_date_type == "balance" and (
+                date_option_type != "balance" or not biz_dates.get("single")
+            ):
+                raise HTTPException(400, "余额类模型必须提供单个业务日期")
+            if model.biz_date_type == "period" and (
+                date_option_type != "period"
+                or not biz_dates.get("start")
+                or not biz_dates.get("end")
+            ):
+                raise HTTPException(400, "时段类模型必须分别提供开始日期和结束日期")
             report_biz_dates = {
                 key: datetime.strptime(value, "%Y-%m-%d").strftime("%Y%m%d")
                 for key, value in biz_dates.items()
@@ -284,13 +355,18 @@ def run_indicator(indicator_id: str, payload: RunIn, db: Session) -> dict:
                         raise HTTPException(400, "余额类衍生度量必须使用单日业务日期参数")
                     business_date = datetime.strptime(biz_dates["single"], "%Y-%m-%d").date()
                     sql_text = _build_balance_derivative_sql(db, model, indicator_config, business_date)
+                    sql_regenerated = True
                 else:
                     original_source = model.source_sql
                     model.source_sql = resolved
                     try:
                         sql_text = generate_indicator_sql(db, indicator_config)
+                        sql_regenerated = True
                     finally:
                         model.source_sql = original_source
+
+    if business_time_alias and not sql_regenerated:
+        sql_text = generate_indicator_sql(db, indicator_config)
 
     # 业务日期赋值（按 period_type）
     single_date = ""
@@ -317,17 +393,20 @@ def run_indicator(indicator_id: str, payload: RunIn, db: Session) -> dict:
     try:
         source = get_dameng_config()
         rows = dm_query_rows(source, sql_text)
-        # DATA_DATE 维度存在 job_runs.single_date，不占 FIELD 列
+        # DATA_DATE 是旧式跑批日期维度；业务时间字段独立存入 BUSINESS_TIME。
         date_dimension = next(
             (item.get("alias") or item["fieldName"] for item in indicator_config.get("dimensions") or [] if item.get("fieldName") == "DATA_DATE"),
             None,
         )
-        dimension_names = [d for d in result_dimension_names(indicator_config, db) if d != date_dimension]
+        dimension_names = [
+            name for name in result_dimension_names(indicator_config, db)
+            if name != date_dimension and name != business_time_alias
+        ]
         metric_names = result_metric_names(indicator_config)
         written = 0
         try:
             field_map = build_field_map(dimension_names, metric_names)
-            wide_rows = rows_to_wide(rows, field_map)
+            wide_rows = rows_to_wide(rows, field_map, business_time_alias)
             written = write_results(db, ind.code, run_id, wide_rows)
             # 保存 field_map 到指标表，供查询时前端读取
             save_field_map(db, indicator_id, field_map)
