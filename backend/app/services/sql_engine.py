@@ -141,7 +141,10 @@ def measures_of(config: dict) -> list[dict]:
 def result_dimension_names(config: dict, db: Session | None = None) -> list[str]:
     if config.get("indicatorType") == "derived" and db is not None:
         base_ids = config.get("baseIndicatorIds") or []
-        first = db.get(Indicator, base_ids[0]) if base_ids else None
+        first = db.query(Indicator).filter(
+            Indicator.id == base_ids[0],
+            Indicator.deleted_at.is_(None),
+        ).first() if base_ids else None
         if first:
             base_config = json.loads(first.config_json)
             names = [item.get("alias") or item["fieldName"] for item in base_config.get("dimensions") or []]
@@ -208,7 +211,7 @@ def validate_field_sources(config: dict, main_model: DataModel, db: Session) -> 
                 field_cache[mid] = {f.field_name for f in main_model.fields}
             else:
                 m = db.get(DataModel, mid)
-                field_cache[mid] = {f.field_name for f in m.fields} if m else set()
+                field_cache[mid] = {f.field_name for f in m.fields} if m and m.deleted_at is None else set()
         return field_cache[mid]
 
     for section in ("dimensions", "measures", "filters"):
@@ -229,7 +232,7 @@ def model_join_sql(db: Session, model: DataModel, joins: list[dict]) -> str:
     join_sql = ""
     for idx, join in enumerate(joins, start=1):
         join_model = db.get(DataModel, join.get("modelId"))
-        if not join_model:
+        if not join_model or join_model.deleted_at is not None:
             raise ValueError("关联模型不存在")
         alias = f"j{idx}"
         conditions = join.get("conditions") or []
@@ -250,7 +253,13 @@ def model_join_sql(db: Session, model: DataModel, joins: list[dict]) -> str:
 
 def generate_derived_sql(db: Session, config: dict) -> str:
     base_ids = config.get("baseIndicatorIds") or []
-    indicators = [db.get(Indicator, indicator_id) for indicator_id in base_ids]
+    indicators = [
+        db.query(Indicator).filter(
+            Indicator.id == indicator_id,
+            Indicator.deleted_at.is_(None),
+        ).first()
+        for indicator_id in base_ids
+    ]
     if not indicators or any(indicator is None for indicator in indicators):
         raise ValueError("衍生指标引用的基础指标不存在")
 
@@ -310,7 +319,10 @@ def generate_indicator_sql(db: Session, config: dict) -> str:
     model_id = str(config.get("modelId") or "").strip()
     if not model_id:
         raise ValueError("请选择数据模型")
-    model = db.get(DataModel, model_id)
+    model = db.query(DataModel).filter(
+        DataModel.id == model_id,
+        DataModel.deleted_at.is_(None),
+    ).first()
     if not model:
         raise ValueError("模型不存在")
 
@@ -377,7 +389,7 @@ def generate_indicator_sql(db: Session, config: dict) -> str:
         field_types = {field.field_name: field.data_type for field in model.fields}
         for join in config.get("joins") or []:
             join_model = db.get(DataModel, join.get("modelId"))
-            if join_model:
+            if join_model and join_model.deleted_at is None:
                 field_types.update({f.field_name: f.data_type for f in join_model.fields})
         clauses = []
         for index, item in enumerate(filters):

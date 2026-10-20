@@ -34,6 +34,7 @@ class ResultPage:
     rows: list[dict[str, Any]]
     page: int
     page_size: int
+    total: int
     has_more: bool
     dimension_columns: list[str]
     dimension_owners: dict[str, list[dict[str, str]]]
@@ -121,6 +122,7 @@ class PhysicalResultQuery:
                 rows=raw_rows[start:end],
                 page=query.page,
                 page_size=query.page_size,
+                total=len(raw_rows),
                 has_more=len(raw_rows) > end,
                 dimension_columns=sorted(dimension_columns),
                 dimension_owners=dimension_owners,
@@ -210,6 +212,7 @@ class PhysicalResultQuery:
             rows=rows[start:end],
             page=query.page,
             page_size=query.page_size,
+            total=len(rows),
             has_more=len(rows) > end,
             dimension_columns=ordered_dimensions,
             dimension_owners=dimension_owners,
@@ -248,7 +251,10 @@ class PhysicalResultQuery:
             "indicator_code": indicator.code,
             "indicator_id": indicator.id,
         }
-        model = self.db.get(DataModel, indicator.model_id) if indicator.model_id else None
+        model = self.db.query(DataModel).filter(
+            DataModel.id == indicator.model_id,
+            DataModel.deleted_at.is_(None),
+        ).first() if indicator.model_id else None
         date_cond = self._date_condition(
             period_type,
             query,

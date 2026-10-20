@@ -119,6 +119,10 @@ class ModelCreateIn(BaseModel):
     tableName: str = ""   # 自定义 SQL 模式下的占位表名，如 T_CUSTOM_SQL_1；报表模式默认 RPT_{reptid}
 
 
+class ModelSqlUpdateIn(SqlTemplatePreviewIn):
+    """更新自定义 SQL 模型的 SQL 模板。"""
+
+
 class ResolvePreviewIn(BaseModel):
     """代入示例业务日期预览请求（报表模式）。"""
     reptid: str = ""

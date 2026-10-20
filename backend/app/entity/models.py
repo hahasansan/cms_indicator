@@ -33,6 +33,7 @@ class DataModel(Base):
     biz_date_field: Mapped[str | None] = mapped_column(String(64), nullable=True)
     biz_date_start_param: Mapped[str | None] = mapped_column(String(64), nullable=True)
     biz_date_end_param: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     fields: Mapped[list["ModelField"]] = relationship(back_populates="model", cascade="all, delete-orphan")
 
@@ -73,6 +74,7 @@ class Indicator(Base):
     sql_text: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     versions: Mapped[list["IndicatorVersion"]] = relationship(
         back_populates="indicator", cascade="all, delete-orphan"

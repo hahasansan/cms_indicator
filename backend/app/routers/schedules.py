@@ -39,13 +39,19 @@ def _validate_schedule_payload(payload: ScheduleIn, db: Session) -> None:
         raise HTTPException(400, "请选择指标")
     if payload.scope == "category" and not payload.categoryId:
         raise HTTPException(400, "请选择指标分类")
-    if payload.indicatorId and not db.get(Indicator, payload.indicatorId):
+    if payload.indicatorId and not db.query(Indicator).filter(
+        Indicator.id == payload.indicatorId,
+        Indicator.deleted_at.is_(None),
+    ).first():
         raise HTTPException(400, "指标不存在")
 
 
 @router.get("/schedules")
 def list_schedules(db: Session = Depends(get_db)) -> list[dict]:
-    rows = db.query(Schedule, Indicator.name).outerjoin(Indicator, Indicator.id == Schedule.indicator_id).all()
+    rows = db.query(Schedule, Indicator.name).join(
+        Indicator,
+        Indicator.id == Schedule.indicator_id,
+    ).filter(Indicator.deleted_at.is_(None)).all()
     return [schedule_to_dict(schedule, name or "") for schedule, name in rows]
 
 
@@ -57,7 +63,10 @@ def create_schedule(payload: ScheduleIn, db: Session = Depends(get_db)) -> dict:
     db.add(schedule)
     db.commit()
     sched.upsert(schedule.id)
-    indicator = db.get(Indicator, schedule.indicator_id)
+    indicator = db.query(Indicator).filter(
+        Indicator.id == schedule.indicator_id,
+        Indicator.deleted_at.is_(None),
+    ).first()
     return schedule_to_dict(schedule, indicator.name if indicator else "")
 
 
@@ -70,7 +79,10 @@ def update_schedule(schedule_id: str, payload: ScheduleIn, db: Session = Depends
     _apply_schedule_payload(schedule, payload)
     db.commit()
     sched.upsert(schedule.id)
-    indicator = db.get(Indicator, schedule.indicator_id)
+    indicator = db.query(Indicator).filter(
+        Indicator.id == schedule.indicator_id,
+        Indicator.deleted_at.is_(None),
+    ).first()
     return schedule_to_dict(schedule, indicator.name if indicator else "")
 
 
@@ -79,6 +91,11 @@ def run_schedule(schedule_id: str, db: Session = Depends(get_db)) -> dict:
     schedule = db.get(Schedule, schedule_id)
     if not schedule:
         raise HTTPException(404, "调度不存在")
+    if not db.query(Indicator).filter(
+        Indicator.id == schedule.indicator_id,
+        Indicator.deleted_at.is_(None),
+    ).first():
+        raise HTTPException(404, "指标不存在")
     date_option = json.loads(schedule.date_option) if schedule.date_option else None
     indicator_ids = [schedule.indicator_id] if schedule.scope in ("selected", "") else []
     result = run_batch_indicators(db, schedule.scope or "selected", schedule.category_id or "", indicator_ids, date_option)

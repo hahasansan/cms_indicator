@@ -287,11 +287,17 @@ def _build_balance_derivative_sql(
 
 
 def run_indicator(indicator_id: str, payload: RunIn, db: Session) -> dict:
-    ind = db.get(Indicator, indicator_id)
+    ind = db.query(Indicator).filter(
+        Indicator.id == indicator_id,
+        Indicator.deleted_at.is_(None),
+    ).first()
     if not ind:
         raise HTTPException(404, "指标不存在")
     sql_text = ind.sql_text
-    model = db.get(DataModel, ind.model_id) if ind.model_id else None
+    model = db.query(DataModel).filter(
+        DataModel.id == ind.model_id,
+        DataModel.deleted_at.is_(None),
+    ).first() if ind.model_id else None
     if model and model.biz_date_type == "period":
         period_type = "period"
     elif model and model.biz_date_type == "balance":
@@ -441,12 +447,18 @@ def run_indicator(indicator_id: str, payload: RunIn, db: Session) -> dict:
 def run_batch_indicators(db: Session, scope: str, category_id: str, indicator_ids: list[str], date_option: dict | None) -> dict:
     """按范围取一批指标，逐个用业务日期选项运行写结果。供接口和定时调度共用。"""
     if scope == "all":
-        indicators = db.query(Indicator).all()
+        indicators = db.query(Indicator).filter(Indicator.deleted_at.is_(None)).all()
     elif scope == "category":
-        indicators = db.query(Indicator).filter(Indicator.category_id == category_id).all()
+        indicators = db.query(Indicator).filter(
+            Indicator.category_id == category_id,
+            Indicator.deleted_at.is_(None),
+        ).all()
     else:
         ids = list(dict.fromkeys(indicator_ids))
-        indicators = db.query(Indicator).filter(Indicator.id.in_(ids)).all() if ids else []
+        indicators = db.query(Indicator).filter(
+            Indicator.id.in_(ids),
+            Indicator.deleted_at.is_(None),
+        ).all() if ids else []
     if not indicators:
         return {"total": 0, "success": 0, "failed": 0, "details": []}
     details: list[dict] = []

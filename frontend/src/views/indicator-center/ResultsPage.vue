@@ -63,7 +63,7 @@
           <template #header>
             <div class="iq-head-bar">
               <strong>数据展示</strong>
-              <span class="muted">{{ tableRows.length ? `返回 ${tableRows.length} 行` : '未执行查询' }}</span>
+              <span class="muted">{{ total ? `共 ${total} 行` : '未执行查询' }}</span>
               <div class="iq-result-actions">
                 <el-button type="primary" :disabled="!selectedIds.length || loading" @click="queryResults">查询</el-button>
                 <el-button :disabled="loading" @click="resetQuery">重置</el-button>
@@ -103,10 +103,18 @@
               <template #default="{ row }">{{ formatValue(row.values[column.key]) }}</template>
             </el-table-column>
           </el-table>
-          <div v-if="tableRows.length" class="iq-pagination">
-            <span class="muted">第 {{ page }} 页</span>
-            <el-button size="small" :disabled="loading || page <= 1" @click="changePage(page - 1)">上一页</el-button>
-            <el-button size="small" :disabled="loading || !hasMore" @click="changePage(page + 1)">下一页</el-button>
+          <div v-if="total" class="iq-pagination">
+            <el-pagination
+              v-model:current-page="page"
+              v-model:page-size="pageSize"
+              :total="total"
+              :page-sizes="[20, 50, 100, 200, 500]"
+              :disabled="loading"
+              layout="total, sizes, prev, pager, next, jumper"
+              background
+              @current-change="loadResults"
+              @size-change="onPageSizeChange"
+            />
           </div>
         </el-card>
       </div>
@@ -165,8 +173,8 @@ const keyword = ref('')
 const startDate = ref('')
 const endDate = ref('')
 const page = ref(1)
-const pageSize = 100
-const hasMore = ref(false)
+const pageSize = ref(100)
+const total = ref(0)
 const dimensionFilters = ref<Record<string, string>>({})
 const selectedIds = ref<string[]>(props.indicatorId ? [props.indicatorId] : [])
 const rows = ref<ResultRow[]>([])
@@ -233,7 +241,7 @@ function onSelect(id: string, checked: boolean) { const next = new Set(selectedI
 function selectVisible() { const ids = flattenTree(filteredTree.value).filter((node) => node.indicatorId).map((node) => node.indicatorId!); selectedIds.value = [...new Set([...selectedIds.value, ...ids])] }
 function clearSelection() { selectedIds.value = [] }
 function flattenTree(nodes: TreeNode[]): TreeNode[] { return nodes.flatMap((node) => [node, ...flattenTree(node.children)]) }
-function resetQuery() { startDate.value = ''; endDate.value = ''; dimensionFilters.value = {}; page.value = 1; hasMore.value = false; rows.value = []; dimensionColumns.value = []; dimensionOwners.value = {}; measureGroups.value = [] }
+function resetQuery() { startDate.value = ''; endDate.value = ''; dimensionFilters.value = {}; page.value = 1; total.value = 0; rows.value = []; dimensionColumns.value = []; dimensionOwners.value = {}; measureGroups.value = [] }
 function goBack() { window.history.back() }
 function formatValue(value: unknown) { return value === null || value === undefined || value === '' ? '' : String(value) }
 function periodLabel(row: ResultRow) {
@@ -278,17 +286,17 @@ async function loadResults() {
     if (endDate.value) params.set('endDate', endDate.value)
     if (Object.keys(dimensionFilters.value).length) params.set('dimensionFilters', JSON.stringify(dimensionFilters.value))
     params.set('page', String(page.value))
-    params.set('pageSize', String(pageSize))
-    const result = await apiClient<{ rows: ResultRow[]; dimensionColumns: string[]; dimensionOwners: Record<string, DimensionOwner[]>; measureGroups: MeasureGroup[]; hasMore: boolean }>(`/api/indicator-results?${params.toString()}`)
+    params.set('pageSize', String(pageSize.value))
+    const result = await apiClient<{ rows: ResultRow[]; dimensionColumns: string[]; dimensionOwners: Record<string, DimensionOwner[]>; measureGroups: MeasureGroup[]; total: number }>(`/api/indicator-results?${params.toString()}`)
     rows.value = result.rows
     dimensionColumns.value = result.dimensionColumns
     dimensionOwners.value = result.dimensionOwners
     measureGroups.value = result.measureGroups
-    hasMore.value = result.hasMore
+    total.value = result.total
   } catch (error) { notify(error instanceof Error ? error.message : String(error)) } finally { loading.value = false }
 }
-async function changePage(nextPage: number) {
-  page.value = nextPage
+async function onPageSizeChange() {
+  page.value = 1
   await loadResults()
 }
 async function addToFavorites() {

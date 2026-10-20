@@ -23,7 +23,10 @@ def _selected_indicators(indicator_ids: str, db: Session) -> list[Indicator]:
         return []
     indicators_by_id = {
         indicator.id: indicator
-        for indicator in db.query(Indicator).filter(Indicator.id.in_(ids)).all()
+        for indicator in db.query(Indicator).filter(
+            Indicator.id.in_(ids),
+            Indicator.deleted_at.is_(None),
+        ).all()
     }
     if len(indicators_by_id) != len(ids):
         raise HTTPException(400, "存在不存在的指标")
@@ -114,6 +117,7 @@ def query_indicator_results(
             "measureGroups": [],
             "page": 1,
             "pageSize": pageSize,
+            "total": 0,
             "hasMore": False,
         }
     query = _build_query(startDate, endDate, dimensionFilters, fieldMap, page, pageSize)
@@ -126,13 +130,17 @@ def query_indicator_results(
         "measureGroups": result_page.measure_groups,
         "page": result_page.page,
         "pageSize": result_page.page_size,
+        "total": result_page.total,
         "hasMore": result_page.has_more,
     }
 
 
 @router.get("/indicators/{indicator_id}/results")
 def indicator_results(indicator_id: str, db: Session = Depends(get_db)) -> dict:
-    indicator = db.get(Indicator, indicator_id)
+    indicator = db.query(Indicator).filter(
+        Indicator.id == indicator_id,
+        Indicator.deleted_at.is_(None),
+    ).first()
     if not indicator:
         raise HTTPException(404, "指标不存在")
     result_page = PhysicalResultQuery(db).fetch(
@@ -146,5 +154,6 @@ def indicator_results(indicator_id: str, db: Session = Depends(get_db)) -> dict:
         "dimensionColumns": result_page.dimension_columns,
         "dimensionOwners": result_page.dimension_owners,
         "measureGroups": result_page.measure_groups,
+        "total": result_page.total,
         "hasMore": result_page.has_more,
     }

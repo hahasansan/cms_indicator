@@ -13,11 +13,18 @@ from app.routers.deps import build_indicator_sql
 from app.entity.schemas import FavoriteIn, IndicatorCategoryIn, IndicatorIn, RunIn
 from app.utils.database import get_db
 from app.utils.serializers import indicator_category_to_dict, indicator_to_dict
-from app.services import scheduler as sched
+from app.services.deletion import soft_delete_indicator
 from app.services.runner import run_indicator
 from app.utils.common import new_id
 
 router = APIRouter(tags=["指标"])
+
+
+def _active_indicator(db: Session, indicator_id: str) -> Indicator | None:
+    return db.query(Indicator).filter(
+        Indicator.id == indicator_id,
+        Indicator.deleted_at.is_(None),
+    ).first()
 
 
 def _next_indicator_code(db: Session) -> str:
@@ -36,7 +43,7 @@ def _check_parent(db: Session, parent_id: str, forbid_self: str | None = None) -
         return
     if parent_id == forbid_self:
         raise HTTPException(400, "父指标不能选择自身")
-    if not db.get(Indicator, parent_id):
+    if not _active_indicator(db, parent_id):
         raise HTTPException(400, "父指标不存在")
 
 
@@ -51,7 +58,7 @@ def list_indicators(
     db: Session = Depends(get_db),
 ) -> dict:
     """分页查询指标列表，按更新时间倒序。keyword 下推到 SQL。"""
-    query = db.query(Indicator)
+    query = db.query(Indicator).filter(Indicator.deleted_at.is_(None))
     if status:
         query = query.filter(Indicator.status == status)
     if modelId:
@@ -80,7 +87,7 @@ def list_indicators_options(db: Session = Depends(get_db)) -> list[dict]:
 
     resultTable 从 config 解析，供 ImpactPage 同表筛选用。
     """
-    rows = db.query(Indicator).order_by(Indicator.updated_at.desc()).all()
+    rows = db.query(Indicator).filter(Indicator.deleted_at.is_(None)).order_by(Indicator.updated_at.desc()).all()
     result = []
     for row in rows:
         try:
@@ -108,7 +115,7 @@ def list_indicators_options(db: Session = Depends(get_db)) -> list[dict]:
 @router.get("/indicators/{indicator_id}")
 def get_indicator(indicator_id: str, db: Session = Depends(get_db)) -> dict:
     """获取单个指标完整详情（含 config/sqlText）。"""
-    row = db.get(Indicator, indicator_id)
+    row = _active_indicator(db, indicator_id)
     if not row:
         raise HTTPException(404, "指标不存在")
     return indicator_to_dict(row)
@@ -117,9 +124,14 @@ def get_indicator(indicator_id: str, db: Session = Depends(get_db)) -> dict:
 @router.post("/indicators")
 def create_indicator(payload: IndicatorIn, db: Session = Depends(get_db)) -> dict:
     _check_parent(db, payload.parentId or "")
+    model = db.query(DataModel).filter(
+        DataModel.id == payload.modelId,
+        DataModel.deleted_at.is_(None),
+    ).first() if payload.modelId else None
+    if payload.modelId and not model:
+        raise HTTPException(400, "数据模型不存在")
     code = _next_indicator_code(db)
     sql_text = build_indicator_sql(db, payload.config)
-    model = db.get(DataModel, payload.modelId) if payload.modelId else None
     period_type = "period" if model and model.biz_date_type == "period" else "point"
     ind = Indicator(id=new_id("ind"), code=code, name=payload.name, model_id=payload.modelId or None, parent_id=payload.parentId or None, category_id=payload.categoryId, status=payload.status, period_type=period_type, config_json=json.dumps(payload.config, ensure_ascii=False), sql_text=sql_text)
     db.add(ind)
@@ -130,7 +142,7 @@ def create_indicator(payload: IndicatorIn, db: Session = Depends(get_db)) -> dic
 
 @router.put("/indicators/{indicator_id}")
 def update_indicator(indicator_id: str, payload: IndicatorIn, db: Session = Depends(get_db)) -> dict:
-    ind = db.get(Indicator, indicator_id)
+    ind = _active_indicator(db, indicator_id)
     if not ind:
         raise HTTPException(404, "指标不存在")
     parent_id = payload.parentId or None
@@ -139,14 +151,20 @@ def update_indicator(indicator_id: str, payload: IndicatorIn, db: Session = Depe
     while ancestor:
         if ancestor == indicator_id:
             raise HTTPException(400, "父指标不能选择当前指标的下级指标")
-        ancestor = db.get(Indicator, ancestor).parent_id if db.get(Indicator, ancestor) else None
+        ancestor_indicator = _active_indicator(db, ancestor)
+        ancestor = ancestor_indicator.parent_id if ancestor_indicator else None
 
     ind.name = payload.name
     ind.model_id = payload.modelId or None
     ind.parent_id = parent_id
     ind.status = payload.status
     ind.category_id = payload.categoryId
-    model = db.get(DataModel, payload.modelId) if payload.modelId else None
+    model = db.query(DataModel).filter(
+        DataModel.id == payload.modelId,
+        DataModel.deleted_at.is_(None),
+    ).first() if payload.modelId else None
+    if payload.modelId and not model:
+        raise HTTPException(400, "数据模型不存在")
     ind.period_type = "period" if model and model.biz_date_type == "period" else "point"
     ind.config_json = json.dumps(payload.config, ensure_ascii=False)
     ind.sql_text = build_indicator_sql(db, payload.config)
@@ -159,7 +177,7 @@ def update_indicator(indicator_id: str, payload: IndicatorIn, db: Session = Depe
 
 @router.post("/indicators/{indicator_id}/copies")
 def copy_indicator(indicator_id: str, db: Session = Depends(get_db)) -> dict:
-    old = db.get(Indicator, indicator_id)
+    old = _active_indicator(db, indicator_id)
     if not old:
         raise HTTPException(404, "指标不存在")
     payload = IndicatorIn(name=f"{old.name} - 副本", modelId=old.model_id or "", parentId=old.parent_id, status="draft", categoryId=old.category_id, config=json.loads(old.config_json))
@@ -168,7 +186,7 @@ def copy_indicator(indicator_id: str, db: Session = Depends(get_db)) -> dict:
 
 @router.put("/indicators/{indicator_id}/favorite")
 def update_indicator_favorite(indicator_id: str, payload: FavoriteIn, db: Session = Depends(get_db)) -> dict:
-    ind = db.get(Indicator, indicator_id)
+    ind = _active_indicator(db, indicator_id)
     if not ind:
         raise HTTPException(404, "指标不存在")
     ind.favorite = payload.favorite
@@ -179,18 +197,16 @@ def update_indicator_favorite(indicator_id: str, payload: FavoriteIn, db: Sessio
 
 @router.delete("/indicators/{indicator_id}")
 def delete_indicator(indicator_id: str, db: Session = Depends(get_db)) -> dict:
-    ind = db.get(Indicator, indicator_id)
+    ind = _active_indicator(db, indicator_id)
     if ind:
-        for schedule in list(ind.schedules):
-            sched.remove(schedule.id)
-        db.delete(ind)
+        soft_delete_indicator(ind)
         db.commit()
     return {"ok": True}
 
 
 @router.get("/indicators/{indicator_id}/versions")
 def versions(indicator_id: str, db: Session = Depends(get_db)) -> list[dict]:
-    ind = db.get(Indicator, indicator_id)
+    ind = _active_indicator(db, indicator_id)
     if not ind:
         raise HTTPException(404, "指标不存在")
     if db.query(IndicatorVersion).filter(IndicatorVersion.indicator_id == indicator_id).count() == 0:
@@ -202,7 +218,7 @@ def versions(indicator_id: str, db: Session = Depends(get_db)) -> list[dict]:
 
 @router.post("/indicators/{indicator_id}/versions/{version_id}/restores")
 def restore_version(indicator_id: str, version_id: int, db: Session = Depends(get_db)) -> dict:
-    ind = db.get(Indicator, indicator_id)
+    ind = _active_indicator(db, indicator_id)
     if not ind:
         raise HTTPException(404, "指标不存在")
     version = db.query(IndicatorVersion).filter(IndicatorVersion.indicator_id == indicator_id, IndicatorVersion.id == version_id).first()
@@ -219,6 +235,8 @@ def restore_version(indicator_id: str, version_id: int, db: Session = Depends(ge
 
 @router.post("/indicators/{indicator_id}/runs")
 def run_indicator_route(indicator_id: str, payload: RunIn, db: Session = Depends(get_db)) -> dict:
+    if not _active_indicator(db, indicator_id):
+        raise HTTPException(404, "指标不存在")
     return run_indicator(indicator_id, payload, db)
 
 
@@ -280,7 +298,10 @@ def delete_indicator_category(category_id: str, db: Session = Depends(get_db)) -
         return {"ok": True}
     if db.query(IndicatorCategory).filter(IndicatorCategory.parent_id == category_id).first():
         raise HTTPException(400, "当前分类包含下级分类，不能删除")
-    if db.query(Indicator).filter(Indicator.category_id == category_id).first():
+    if db.query(Indicator).filter(
+        Indicator.category_id == category_id,
+        Indicator.deleted_at.is_(None),
+    ).first():
         raise HTTPException(400, "当前分类已关联指标，请先调整指标分类")
     db.delete(row)
     db.commit()

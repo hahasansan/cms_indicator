@@ -45,8 +45,12 @@
                 <template #default="{ row }"><el-tag size="small" :type="row.status==='enabled' ? 'success' : 'info'">{{ row.status }}</el-tag></template>
               </el-table-column>
               <el-table-column label="更新时间" width="150"><template #default="{ row }">{{ row.createdAt }}</template></el-table-column>
-              <el-table-column label="操作" width="90">
-                <template #default="{ row }"><el-button size="small" type="primary" link @click.stop="openDetail(row)">配置</el-button></template>
+              <el-table-column label="操作" width="180">
+                <template #default="{ row }">
+                  <el-button size="small" type="primary" link @click.stop="openDetail(row)">配置</el-button>
+                  <el-button v-if="row.sourceType === 'custom_sql'" size="small" type="primary" link @click.stop="openSqlEditor(row)">编辑 SQL</el-button>
+                  <el-button size="small" type="danger" link @click.stop="removeModel(row)">删除</el-button>
+                </template>
               </el-table-column>
             </el-table>
             <div v-if="total" class="model-pagination">
@@ -159,6 +163,18 @@
           <el-button type="primary" @click="saveField">保存字段</el-button>
         </template>
       </el-dialog>
+
+      <el-dialog v-model="sqlEditorOpen" title="编辑自定义 SQL" width="760px" append-to-body :close-on-click-modal="false">
+        <div class="muted field-dialog-meta">{{ editingSqlModel?.name }}（{{ editingSqlModel?.code }}）</div>
+        <el-input v-model="sqlEditorText" type="textarea" :rows="12" placeholder="请输入自定义 SQL 模板" @input="invalidateSqlPreview" />
+        <div v-if="sqlEditorError" class="notice report-preview-error">{{ sqlEditorError }}</div>
+        <div v-if="sqlEditorPreview" class="muted field-dialog-meta">SQL 校验通过，解析到 {{ sqlEditorPreview.fields.length }} 个输出字段；保存后会同步模型字段。</div>
+        <template #footer>
+          <el-button @click="sqlEditorOpen = false">取消</el-button>
+          <el-button :loading="sqlEditorLoading" @click="previewSqlUpdate">解析校验</el-button>
+          <el-button type="primary" :disabled="!sqlEditorPreview || sqlEditorPreview.templateSql !== sqlEditorText" :loading="sqlEditorSaving" @click="saveSqlUpdate">保存 SQL</el-button>
+        </template>
+      </el-dialog>
     </div>
     <CustomSqlImportDialog v-model="sqlImportOpen" @reload="emitReload" />
 
@@ -166,6 +182,7 @@
 
 <script lang="ts">
 import { defineComponent, inject, ref, ref as vueRef, computed as vueComputed, watch as vueWatch } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import CustomSqlImportDialog from '../../components/CustomSqlImportDialog.vue'
 import { api as requestApi, jsonBody as toJsonBody } from '../../api'
 import ReportImportList from '../../components/ReportImportList.vue'
@@ -176,6 +193,7 @@ import type {
   IndicatorOption as IndicatorOptionT,
   IndicatorMeasure as IndicatorMeasureT,
   PageResult as PageResultT,
+  ReportPreviewResult as ReportPreviewResultT,
 } from '../../types'
 
 const ToastInject = 'notify'
@@ -222,6 +240,13 @@ const ModelsPage = defineComponent({
     const total = vueRef(0)
     const modelList = vueRef<DataModelT[]>([])
     const activeDetail = vueRef<DataModelT | null>(null)
+    const sqlEditorOpen = vueRef(false)
+    const editingSqlModel = vueRef<DataModelT | null>(null)
+    const sqlEditorText = vueRef('')
+    const sqlEditorPreview = vueRef<ReportPreviewResultT | null>(null)
+    const sqlEditorError = vueRef('')
+    const sqlEditorLoading = vueRef(false)
+    const sqlEditorSaving = vueRef(false)
     const modules = vueComputed(() => Array.from(new Set(props.data.models.map((m) => m.module || '未分组'))))
     const active = vueComputed(() => activeDetail.value)
 
@@ -282,6 +307,79 @@ const ModelsPage = defineComponent({
       drawerOpen.value = true
       try {
         activeDetail.value = await requestApi<DataModelT>(`/api/models/${model.id}`)
+      } catch (error) {
+        notify(error instanceof Error ? error.message : String(error))
+      }
+    }
+    function openSqlEditor(model: DataModelT) {
+      editingSqlModel.value = model
+      sqlEditorText.value = model.sourceTemplate || model.sourceSql || ''
+      sqlEditorPreview.value = null
+      sqlEditorError.value = ''
+      sqlEditorOpen.value = true
+    }
+    function invalidateSqlPreview() {
+      sqlEditorPreview.value = null
+      sqlEditorError.value = ''
+    }
+    async function previewSqlUpdate() {
+      if (!sqlEditorText.value.trim()) {
+        notify('SQL 模板不能为空')
+        return
+      }
+      sqlEditorLoading.value = true
+      sqlEditorError.value = ''
+      try {
+        sqlEditorPreview.value = await requestApi<ReportPreviewResultT>('/api/models/sql-preview', {
+          method: 'POST',
+          body: toJsonBody({ sqlText: sqlEditorText.value }),
+        })
+      } catch (error) {
+        sqlEditorPreview.value = null
+        sqlEditorError.value = error instanceof Error ? error.message : String(error)
+      } finally {
+        sqlEditorLoading.value = false
+      }
+    }
+    async function saveSqlUpdate() {
+      const model = editingSqlModel.value
+      if (!model || !sqlEditorPreview.value || sqlEditorPreview.value.templateSql !== sqlEditorText.value) return
+      sqlEditorSaving.value = true
+      try {
+        await requestApi(`/api/models/${model.id}/sql`, {
+          method: 'PUT',
+          body: toJsonBody({ sqlText: sqlEditorText.value }),
+        })
+        notify('模型 SQL 已更新')
+        sqlEditorOpen.value = false
+        await emitReload()
+        if (activeId.value === model.id) {
+          activeDetail.value = await requestApi<DataModelT>(`/api/models/${model.id}`)
+        }
+      } catch (error) {
+        notify(error instanceof Error ? error.message : String(error))
+      } finally {
+        sqlEditorSaving.value = false
+      }
+    }
+    async function removeModel(model: DataModelT) {
+      try {
+        await ElMessageBox.confirm(
+          `确定删除模型「${model.name}」？关联指标也会逻辑删除，历史数据会保留。`,
+          '删除模型',
+          { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+        )
+      } catch {
+        return
+      }
+      try {
+        const result = await requestApi<{ deletedIndicators: number }>(`/api/models/${model.id}`, { method: 'DELETE' })
+        notify(`模型已删除，关联指标 ${result.deletedIndicators} 个`)
+        if (activeId.value === model.id) {
+          drawerOpen.value = false
+          activeDetail.value = null
+        }
+        await emitReload()
       } catch (error) {
         notify(error instanceof Error ? error.message : String(error))
       }
@@ -350,7 +448,7 @@ const ModelsPage = defineComponent({
     }
     vueWatch(pageSize, () => { currentPage.value = 1; loadModels() })
     loadModels()
-    return { activeId, active, drawerOpen, activeTab, keyword, selectedModule, modules, total, currentPage, pageSize, modelList, loading, counts, referencedIndicators, filteredFields, fieldGroups, fieldCounts, fieldKeyword, fieldRole, fieldDialogOpen, editingField, fieldCategoryFilter, dictCategories, filteredDictSets, onFieldCategoryChange, openDetail, openFieldEditor, closeFieldEditor, saveField, selectModule, query, loadModels, getResultTable, showReportList, sqlImportOpen, emitReload }
+    return { activeId, active, drawerOpen, activeTab, keyword, selectedModule, modules, total, currentPage, pageSize, modelList, loading, counts, referencedIndicators, filteredFields, fieldGroups, fieldCounts, fieldKeyword, fieldRole, fieldDialogOpen, editingField, fieldCategoryFilter, dictCategories, filteredDictSets, onFieldCategoryChange, openDetail, openFieldEditor, closeFieldEditor, saveField, selectModule, query, loadModels, getResultTable, showReportList, sqlImportOpen, emitReload, sqlEditorOpen, editingSqlModel, sqlEditorText, sqlEditorPreview, sqlEditorError, sqlEditorLoading, sqlEditorSaving, openSqlEditor, invalidateSqlPreview, previewSqlUpdate, saveSqlUpdate, removeModel }
   },
 
 })

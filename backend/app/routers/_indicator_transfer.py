@@ -42,14 +42,16 @@ class IndicatorTransferFileIn(BaseModel):
 # ---------------------------------------------------------------------------
 @router.post("/indicators/export")
 def export_indicators(payload: IndicatorExportIn, db: Session = Depends(get_db)) -> Response:
-    query = db.query(Indicator)
+    query = db.query(Indicator).filter(Indicator.deleted_at.is_(None))
     if payload.ids:
         query = query.filter(Indicator.id.in_(payload.ids))
     inds = query.order_by(Indicator.code).all()
     if not inds:
         raise HTTPException(400, "没有可导出的指标")
 
-    models = {m.id: m for m in db.query(DataModel).all()}
+    models = {
+        m.id: m for m in db.query(DataModel).filter(DataModel.deleted_at.is_(None)).all()
+    }
     cats = {c.id: c for c in db.query(IndicatorCategory).all()}
 
     items: list[dict] = []
@@ -98,9 +100,13 @@ def export_indicators(payload: IndicatorExportIn, db: Session = Depends(get_db))
 # 校验（preview 与 import 共用，保证两边口径一致）
 # ---------------------------------------------------------------------------
 def _validate_transfer(db: Session, indicators: list[dict]) -> dict:
-    models = {m.code: m for m in db.query(DataModel).all() if m.code}
+    models = {
+        m.code: m for m in db.query(DataModel).filter(DataModel.deleted_at.is_(None)).all() if m.code
+    }
     cats = {c.name: c for c in db.query(IndicatorCategory).all()}
-    existing_names = {row[0] for row in db.query(Indicator.name).all()}
+    existing_names = {
+        row[0] for row in db.query(Indicator.name).filter(Indicator.deleted_at.is_(None)).all()
+    }
 
     items: list[dict] = []
     missing_models: set[str] = set()
@@ -202,7 +208,9 @@ def import_indicators(payload: IndicatorTransferFileIn, db: Session = Depends(ge
         # 有错误则整体停止，返回完整报告
         return {"blocked": True, **report}
 
-    models = {m.code: m for m in db.query(DataModel).all() if m.code}
+    models = {
+        m.code: m for m in db.query(DataModel).filter(DataModel.deleted_at.is_(None)).all() if m.code
+    }
     cats = {c.name: c for c in db.query(IndicatorCategory).all()}
 
     created: list[dict] = []
