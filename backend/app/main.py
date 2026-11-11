@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.routers import health, indicators, jobs, models, reports, results, schedules, sql, dict_, _indicator_transfer
+from app.routers import health, indicators, jobs, models, reports, results, schedules, sql, dict_, _indicator_transfer, measure_functions
 from app.startup import lifespan
 
 
@@ -38,6 +38,7 @@ async def log_requests(request, call_next):
 for _router in (
     health.router,
     models.router,
+    measure_functions.router,
     dict_.router,
     reports.router,
     sql.router,

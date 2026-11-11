@@ -17,7 +17,7 @@ class DataModel(Base):
     module: Mapped[str] = mapped_column(String(64), default="未分类")
     table_name: Mapped[str] = mapped_column(String(128), nullable=False)
     owner: Mapped[str] = mapped_column(String(64), default ="当前用户")
-    description: Mapped[str] = mapped_column(Text, default="")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     status: Mapped[str] = mapped_column(String(32), default="enabled")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     # 数据来源形态：table=实体表(默认) / report=报表子查询(逻辑映射)
@@ -47,7 +47,7 @@ class ModelField(Base):
     alias: Mapped[str] = mapped_column(String(128), nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False)
     data_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    unit: Mapped[str] = mapped_column(String(32), default="")
+    unit: Mapped[str | None] = mapped_column(String(32), nullable=True, default=None)
     is_date: Mapped[bool] = mapped_column(Boolean, default=False)
     is_org: Mapped[bool] = mapped_column(Boolean, default=False)
     filterable: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -55,6 +55,20 @@ class ModelField(Base):
 
     model: Mapped[DataModel] = relationship(back_populates="fields")
     dict_set: Mapped["DictSet | None"] = relationship()
+
+
+class MeasureFunction(Base):
+    __tablename__ = "measure_functions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    formula: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # 操作数含义：JSON 数组，按 {1}、{2}… 顺序保存每个占位符的业务含义
+    parameters: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 
 class Indicator(Base):
@@ -135,12 +149,12 @@ class JobRun(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     indicator_id: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
-    single_date: Mapped[str] = mapped_column(String(16), nullable=False)
+    single_date: Mapped[str | None] = mapped_column(String(16), nullable=True, default=None)
     business_start_date: Mapped[str | None] = mapped_column(String(16), nullable=True)
     business_end_date: Mapped[str | None] = mapped_column(String(16), nullable=True)
     row_count: Mapped[int] = mapped_column(Integer, default=0)
     sql_text: Mapped[str] = mapped_column(Text, default="")
-    message: Mapped[str] = mapped_column(Text, default="")
+    message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -158,8 +172,8 @@ class SqlFunction(Base):
     template_sql: Mapped[str] = mapped_column(Text, nullable=False)
     args_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     return_type: Mapped[str] = mapped_column(String(32), default="NUMBER")
-    description: Mapped[str] = mapped_column(Text, default="")
-    example: Mapped[str] = mapped_column(Text, default="")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    example: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     editable: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)

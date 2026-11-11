@@ -9,6 +9,9 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 
+# Offline dependency bundles (large binaries, transfer manually)
+deploy/packages/
+
 # Local environment configuration (may contain credentials)
 .env
 .env.*

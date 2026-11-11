@@ -146,7 +146,7 @@ def build_model_from_sql(
         if payload.name:
             name = payload.name
     owner = payload.owner or (name and "当前用户") or "当前用户"
-    description = payload.description or ""
+    description = (payload.description or "").strip() or None
 
     storage_cfg, biz_date_info = _resolve_biz_config(sql_text)
     sample_dates = _sample_dates(biz_date_info.get("type"), payload.sampleDate, payload.sampleStartDate, payload.sampleEndDate)

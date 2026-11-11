@@ -103,10 +103,27 @@ export interface IndicatorMeasure {
   fieldName: string
   alias: string
   aggFunc: string
+  sourceType?: 'field' | 'formula'
   modelId?: string  // 字段来源模型：缺省 = 主模型；与 config.joins 中的 modelId 对应
+  functionId?: string
+  formula?: string
+  inputs?: Array<{ fieldName: string; modelId?: string }>
   unit?: string
   displayPrecision?: number
   derivatives?: string[]
+}
+
+export interface MeasureFunction {
+  id: string
+  code: string
+  name: string
+  formula: string
+  description: string
+  parameterCount: number
+  /** 操作数含义，按 {1}、{2}… 顺序对应，可为空字符串 */
+  parameters?: string[]
+  createdAt: string
+  updatedAt: string
 }
 
 export interface IndicatorConfig {
@@ -121,6 +138,7 @@ export interface IndicatorConfig {
   baseIndicatorIds?: string[]
   derived?: { operator: 'copy' | 'sum' | 'difference' | 'ratio'; alias: string }
   basic?: { bizCaliber?: string; techCaliber?: string; visibility?: string; expireType?: string; expireDate?: string }
+  bizDate?: { type: '' | 'balance' | 'period'; field: string }
   schedule?: { frequency?: string; resultTable?: string; priority?: number; runTime?: string }
 }
 
@@ -133,6 +151,8 @@ export interface Indicator {
   categoryId: string
   status: string
   favorite: boolean
+  periodType?: string
+  bizDateType?: 'balance' | 'period' | ''
   config: IndicatorConfig
   sqlText: string
   createdAt: string
@@ -208,6 +228,7 @@ export interface IndicatorOption {
   status: string
   favorite: boolean
   parentId: string
+  bizDateType?: 'balance' | 'period' | ''
   resultTable: string
   createdAt: string
   updatedAt: string

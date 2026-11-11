@@ -1,15 +1,9 @@
 <template>
-    <ReportImportList
-      v-if="showReportList"
-      show-back
-      @reload="emitReload"
-      @back="showReportList = false"
-    />
-    <div v-else class="page data-list-page">
+    <div class="page data-list-page">
       <div class="page-head">
         <div><h1>模型管理</h1><div class="desc">按业务域管理数据模型，维护字段口径、角色、属性、样例数据、引用指标和上下游血缘。</div></div>
         <div class="actions">
-          <el-button @click="showReportList = true">将系统报表导入</el-button>
+          <!-- <el-button @click="showReportList = true">将系统报表导入</el-button> -->
           <el-button type="primary" @click="sqlImportOpen = true">自定义 SQL 导入</el-button>
         </div>
       </div>
@@ -132,8 +126,8 @@
         <div v-if="editingField">
           <div class="muted field-dialog-meta">{{ editingField.name }} · {{ editingField.dataType }}</div>
           <el-form label-width="110px">
-            <el-form-item label="业务名称"><el-input v-model="editingField.alias" /></el-form-item>
-            <el-form-item label="字段角色"><el-select v-model="editingField.role" style="width:100%"><el-option value="dimension" label="维度字段" /><el-option value="measure" label="度量字段" /><el-option value="normal" label="普通字段" /></el-select></el-form-item>
+            <el-form-item label="业务名称" required><el-input v-model="editingField.alias" /></el-form-item>
+            <el-form-item label="字段角色" required><el-select v-model="editingField.role" style="width:100%"><el-option value="dimension" label="维度字段" /><el-option value="measure" label="度量字段" /><el-option value="normal" label="普通字段" /></el-select></el-form-item>
             <el-form-item label="单位"><el-input v-model="editingField.unit" placeholder="例如：元、户、%" /></el-form-item>
             <el-form-item label="业务属性">
               <el-checkbox v-model="editingField.isDate">日期字段</el-checkbox>
@@ -185,7 +179,7 @@ import { defineComponent, inject, ref, ref as vueRef, computed as vueComputed, w
 import { ElMessageBox } from 'element-plus'
 import CustomSqlImportDialog from '../../components/CustomSqlImportDialog.vue'
 import { api as requestApi, jsonBody as toJsonBody } from '../../api'
-import ReportImportList from '../../components/ReportImportList.vue'
+// import ReportImportList from '../../components/ReportImportList.vue'
 import type {
   BootstrapData as BootstrapDataT,
   DataModel as DataModelT,
@@ -211,7 +205,7 @@ function getResultTable(indicator: IndicatorOptionT) {
 }
 
 const ModelsPage = defineComponent({
-  components: { CustomSqlImportDialog, ReportImportList },
+  components: { CustomSqlImportDialog /*, ReportImportList*/ },
   props: { data: { type: Object as () => BootstrapDataT, required: true } },
   emits: ['reload'],
   setup(props, { emit }) {
@@ -419,6 +413,10 @@ const ModelsPage = defineComponent({
       if (!editingField.value || !model) return
       if (!editingField.value.alias.trim()) {
         notify('请填写字段业务名称')
+        return
+      }
+      if (!editingField.value.role) {
+        notify('请选择字段角色')
         return
       }
       const payload = {

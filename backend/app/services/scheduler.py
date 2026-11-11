@@ -32,9 +32,17 @@ def build_trigger(frequency: str, run_time: str) -> CronTrigger | None:
     if frequency == "日":
         return CronTrigger(day_of_week="*", hour=h, minute=m, timezone=TZ)
     if frequency == "周":
-        return CronTrigger(day_of_week="mon", hour=h, minute=m, timezone=TZ)
+        # 周频率固定周日运行，统计本周一到本周日
+        return CronTrigger(day_of_week="sun", hour=h, minute=m, timezone=TZ)
     if frequency == "月":
-        return CronTrigger(day=1, hour=h, minute=m, timezone=TZ)
+        # 月频率固定月末运行
+        return CronTrigger(day="last", hour=h, minute=m, timezone=TZ)
+    if frequency == "季度":
+        # 季度频率在 3/6/9/12 月末运行
+        return CronTrigger(month="3,6,9,12", day="last", hour=h, minute=m, timezone=TZ)
+    if frequency == "年":
+        # 年频率在 12 月末运行
+        return CronTrigger(month="12", day="last", hour=h, minute=m, timezone=TZ)
     return None  # 手动，不自动触发
 
 

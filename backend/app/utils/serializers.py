@@ -56,6 +56,8 @@ def model_to_dict(model: DataModel) -> dict:
 
 
 def indicator_to_dict(ind: Indicator) -> dict:
+    config = json.loads(ind.config_json)
+    biz_date = config.get("bizDate") if isinstance(config.get("bizDate"), dict) else {}
     return {
         "id": ind.id,
         "code": ind.code,
@@ -66,7 +68,8 @@ def indicator_to_dict(ind: Indicator) -> dict:
         "status": ind.status,
         "favorite": ind.favorite,
         "periodType": ind.period_type,
-        "config": json.loads(ind.config_json),
+        "bizDateType": biz_date.get("type") or "",
+        "config": config,
         "sqlText": ind.sql_text,
         "createdAt": ind.created_at.strftime("%Y-%m-%d %H:%M:%S"),
         "updatedAt": ind.updated_at.strftime("%Y-%m-%d %H:%M:%S"),

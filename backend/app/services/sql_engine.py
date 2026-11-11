@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy.orm import Session
 
 from app.entity.models import DataModel, Indicator
+from app.services.measure_formula import formula_parameter_count, render_measure_formula
 from app.services.result_writer import FIELD_COUNT
 
 
@@ -172,7 +173,7 @@ def result_metric_names(config: dict) -> list[str]:
 
 def aggregate_function(value: object) -> str:
     function = str(value or "SUM").upper()
-    if function not in {"SUM", "AVG", "MAX", "MIN", "COUNT"}:
+    if function not in {"NONE", "SUM", "AVG", "MAX", "MIN", "COUNT"}:
         raise ValueError("不支持的聚合函数")
     return function
 
@@ -197,6 +198,56 @@ def alias_of_model(config: dict, model_id: str, main_model_id: str) -> str:
         if join.get("modelId") == model_id:
             return f"j{idx}"
     return "a"
+
+
+def biz_date_config(config: dict, model: DataModel | None) -> dict:
+    """指标自身的业务时间类型和字段；SQL 参数名优先用模型，模型未配置时自动生成。
+
+    自动生成规则：参数名与业务时间字段名一致；时段类增加 _start / _end 后缀。
+    """
+    biz = config.get("bizDate")
+    biz_type = str(biz.get("type") or "") if isinstance(biz, dict) else ""
+    biz_field = str(biz.get("field") or "").strip() if isinstance(biz, dict) else ""
+    if not biz_type and model:
+        biz_type = model.biz_date_type or ""
+    if not biz_field and model:
+        biz_field = model.biz_date_field or ""
+    model_start = (model.biz_date_start_param or "") if model else ""
+    model_end = (model.biz_date_end_param or "") if model else ""
+    auto = bool(biz_type and biz_field and model and not model_start)
+    if auto:
+        field_token = biz_field.rsplit(".", 1)[-1].strip('"`')
+        if biz_type == "period":
+            start_param, end_param = f"{field_token}_start", f"{field_token}_end"
+        else:
+            start_param, end_param = field_token, ""
+    else:
+        start_param, end_param = model_start, model_end
+    return {
+        "type": biz_type,
+        "field": biz_field,
+        "start_param": start_param,
+        "end_param": end_param,
+        "auto": auto,
+    }
+
+
+def validate_biz_date_config(config: dict, model: DataModel) -> None:
+    """校验指标业务时间配置：类型合法、字段为模型内日期型字段。"""
+    biz = config.get("bizDate")
+    if not isinstance(biz, dict) or not biz.get("type"):
+        return
+    biz_type = str(biz.get("type") or "")
+    if biz_type not in {"balance", "period"}:
+        raise ValueError("业务时间类型只能选择余额类或时段类")
+    field_name = str(biz.get("field") or "").strip()
+    if not field_name:
+        raise ValueError("请选择业务时间字段")
+    matched = next((field for field in model.fields if field.field_name == field_name), None)
+    if matched is None:
+        raise ValueError(f"业务时间字段“{field_name}”不属于当前模型")
+    if not matched.is_date:
+        raise ValueError(f"业务时间字段“{field_name}”不是日期型字段，不能作为业务时间字段")
 
 
 def validate_field_sources(config: dict, main_model: DataModel, db: Session) -> None:
@@ -226,6 +277,23 @@ def validate_field_sources(config: dict, main_model: DataModel, db: Session) -> 
             target_mid = mid or main_model.id
             if field_name and field_name not in fields_of(target_mid):
                 raise ValueError(f"字段“{field_name}”不存在于来源模型中")
+    for measure in measures_of(config):
+        if not measure.get("functionId"):
+            continue
+        expected = formula_parameter_count(str(measure.get("formula") or ""))
+        inputs = measure.get("inputs") or []
+        if not isinstance(inputs, list) or any(not isinstance(item, dict) for item in inputs):
+            raise ValueError(f"度量“{measure.get('alias') or '未命名'}”的公式字段配置无效")
+        if len(inputs) != expected:
+            raise ValueError(f"度量“{measure.get('alias') or '未命名'}”需要选择 {expected} 个公式字段")
+        for item in inputs:
+            field_name = str(item.get("fieldName") or "")
+            source_model_id = str(item.get("modelId") or main_model.id)
+            if source_model_id not in valid_model_ids:
+                raise ValueError(f"公式字段“{field_name}”的来源模型未关联")
+            if field_name not in fields_of(source_model_id):
+                raise ValueError(f"公式字段“{field_name}”不存在于来源模型中")
+        aggregate_function(measure.get("aggFunc") or "NONE")
 
 
 def model_join_sql(db: Session, model: DataModel, joins: list[dict]) -> str:
@@ -327,8 +395,9 @@ def generate_indicator_sql(db: Session, config: dict) -> str:
         raise ValueError("模型不存在")
 
     # 校验维度/度量/筛选字段的来源模型合法性
-    if config.get("joins"):
-        validate_field_sources(config, model, db)
+    validate_field_sources(config, model, db)
+    # 校验指标自身保存的业务时间参数
+    validate_biz_date_config(config, model)
 
     raw_dims = config.get("dimensions") or []
     # 维度去重（按 modelId:fieldName），避免前端状态异常导致 SELECT/GROUP BY 同列多次出现
@@ -353,12 +422,13 @@ def generate_indicator_sql(db: Session, config: dict) -> str:
     unknown_derivatives = requested_derivatives.difference(DERIVATIVE_LABELS)
     if unknown_derivatives:
         raise ValueError(f"不支持的衍生度量：{', '.join(sorted(unknown_derivatives))}")
+    indicator_biz = biz_date_config(config, model)
     if requested_derivatives and (
         model.source_type not in {"report", "custom_sql"}
-        or model.biz_date_type != "balance"
+        or indicator_biz["type"] != "balance"
         or not model.source_template
     ):
-        raise ValueError("衍生度量仅适用于配置了业务日期参数的余额类报表模型")
+        raise ValueError("衍生度量仅适用于配置了业务日期参数的余额类指标")
 
     stored_dimensions = sum(
         dim.get("fieldName") != "DATA_DATE" and not dim.get("isBusinessTime")
@@ -371,14 +441,35 @@ def generate_indicator_sql(db: Session, config: dict) -> str:
     select_dims = [f"  {sql_field(d['fieldName'], alias_of_model(config, str(d.get('modelId') or ''), model_id))} AS {quote_alias(d.get('alias') or d['fieldName'])}" for d in dims]
     group_by = [sql_field(d["fieldName"], alias_of_model(config, str(d.get("modelId") or ""), model_id)) for d in dims]
     select_measures = []
+    # 构造系统内置占位符：业务区间天数（period = 区间天数；balance = 1；未配置业务时间则不注入）
+    biz_days_sql = ""
+    if indicator_biz.get("start_param"):
+        sp = indicator_biz["start_param"]
+        ep = indicator_biz.get("end_param") or indicator_biz["start_param"]
+        biz_days_sql = f"TO_DATE(':{ep}', 'YYYYMMDD') - TO_DATE(':{sp}', 'YYYYMMDD') + 1"
+    system_placeholders: dict[str, str] = {"__BIZ_DAYS__": biz_days_sql} if biz_days_sql else {}
     for m in measures:
-        field_expr = measure_expression(m, config, model_id)
-        agg_func = str(m.get("aggFunc") or "SUM").upper()
         alias = m.get("alias") or m.get("fieldName") or "度量值"
-        if agg_func == "NONE":
-            select_measures.append(f"  {field_expr} AS {quote_alias(alias)}")
+        if m.get("functionId"):
+            formula = str(m.get("formula") or "")
+            formula_parameter_count(formula)
+            inputs = m.get("inputs") or []
+            field_expressions = [
+                sql_field(
+                    str(item.get("fieldName") or ""),
+                    alias_of_model(config, str(item.get("modelId") or ""), model_id),
+                )
+                for item in inputs
+            ]
+            expression = render_measure_formula(formula, inputs, field_expressions, system_placeholders)
         else:
-            select_measures.append(f"  {aggregate_function(agg_func)}({field_expr}) AS {quote_alias(alias)}")
+            field_expr = measure_expression(m, config, model_id)
+            expression = field_expr
+        default_aggregate = "NONE" if m.get("functionId") else "SUM"
+        agg_func = aggregate_function(m.get("aggFunc") or default_aggregate)
+        if agg_func != "NONE":
+            expression = f"{agg_func}({expression})"
+        select_measures.append(f"  {expression} AS {quote_alias(alias)}")
 
     join_sql = model_join_sql(db, model, config.get("joins") or [])
 
@@ -396,6 +487,18 @@ def generate_indicator_sql(db: Session, config: dict) -> str:
             prefix = "" if index == 0 else f"{filter_join(item)} "
             clauses.append(f"  {prefix}({filter_sql(item, field_types, config, model_id)})")
         where_sql = "\nWHERE\n" + "\n".join(clauses)
+
+    # 模型未写业务时间参数时，按指标的业务时间类型和字段自动生成日期过滤条件
+    if indicator_biz.get("auto") and indicator_biz["field"]:
+        biz_field_sql = sql_field(indicator_biz["field"], "a")
+        if indicator_biz["type"] == "period":
+            auto_clause = (
+                f"{biz_field_sql} BETWEEN TO_DATE(':{indicator_biz['start_param']}', 'YYYYMMDD') "
+                f"AND TO_DATE(':{indicator_biz['end_param']}', 'YYYYMMDD')"
+            )
+        else:
+            auto_clause = f"{biz_field_sql} = TO_DATE(':{indicator_biz['start_param']}', 'YYYYMMDD')"
+        where_sql = f"{where_sql}\n  AND {auto_clause}" if where_sql else f"\nWHERE\n  {auto_clause}"
 
     select_sql = ",\n".join(select_dims + select_measures)
     group_sql = ", ".join(group_by)

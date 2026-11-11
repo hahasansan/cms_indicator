@@ -5,6 +5,7 @@
     <DictPage v-else-if="view === 'dict'" :data="data" @reload="reload" />
     <BuilderPage v-else-if="view === 'builder'" :data="data" :editing-id="editingId" @saved="saved" @back="back" />
     <IndicatorsPage v-else-if="view === 'indicators'" :data="data" @go="go" @edit="edit" @reload="reload" />
+    <FunctionsPage v-else-if="view === 'functions'" />
     <VersionsPage v-else-if="view === 'versions'" :data="data" :indicator-id="indicatorId" @go="go" @reload="reload" />
     <ResultsPage v-else-if="view === 'results'" :data="data" :indicator-id="indicatorId" />
     <LineagePage v-else-if="view === 'lineage'" :data="data" :indicator-id="indicatorId" />
@@ -29,6 +30,7 @@ import DictPage from '../views/data-assets/DictPage.vue'
 import BuilderPage from '../views/indicator-center/BuilderPage.vue'
 import ImpactPage from '../views/indicator-center/ImpactPage.vue'
 import IndicatorsPage from '../views/indicator-center/IndicatorsPage.vue'
+import FunctionsPage from '../views/indicator-center/FunctionsPage.vue'
 import LineagePage from '../views/indicator-center/LineagePage.vue'
 import ResultsPage from '../views/indicator-center/ResultsPage.vue'
 import VersionsPage from '../views/indicator-center/VersionsPage.vue'

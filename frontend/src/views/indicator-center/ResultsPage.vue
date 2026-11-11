@@ -87,7 +87,12 @@
               :label-class-name="dimensionClass(column)"
               min-width="130"
             >
-              <template #header>{{ column }}</template>
+              <template #header>
+                <div class="col-header">
+                  <span>{{ column }}</span>
+                  <span class="col-owner" :title="dimensionOwnerText(column)">{{ dimensionOwnerText(column) }}</span>
+                </div>
+              </template>
               <template #default="{ row }">{{ formatValue(row.dimensions[column]) }}</template>
             </el-table-column>
             <el-table-column
@@ -99,8 +104,13 @@
               min-width="150"
               align="right"
             >
-              <template #header>{{ column.alias }}</template>
-              <template #default="{ row }">{{ formatValue(row.values[column.key]) }}</template>
+              <template #header>
+                <div class="col-header">
+                  <span>{{ column.alias }}</span>
+                  <span class="col-owner" :title="`${column.indicatorCode} ${column.indicatorName}`">{{ column.indicatorName }}</span>
+                </div>
+              </template>
+              <template #default="{ row }">{{ formatMeasure(row.values[column.key], column.displayPrecision) }}</template>
             </el-table-column>
           </el-table>
           <div v-if="total" class="iq-pagination">
@@ -134,7 +144,12 @@
           :label-class-name="dimensionClass(column)"
           min-width="130"
         >
-          <template #header>{{ column }}</template>
+          <template #header>
+            <div class="col-header">
+              <span>{{ column }}</span>
+              <span class="col-owner" :title="dimensionOwnerText(column)">{{ dimensionOwnerText(column) }}</span>
+            </div>
+          </template>
           <template #default="{ row }">{{ formatValue(row.dimensions[column]) }}</template>
         </el-table-column>
         <el-table-column
@@ -146,8 +161,13 @@
           min-width="150"
           align="right"
         >
-          <template #header>{{ column.alias }}</template>
-          <template #default="{ row }">{{ formatValue(row.values[column.key]) }}</template>
+          <template #header>
+            <div class="col-header">
+              <span>{{ column.alias }}</span>
+              <span class="col-owner" :title="`${column.indicatorCode} ${column.indicatorName}`">{{ column.indicatorName }}</span>
+            </div>
+          </template>
+          <template #default="{ row }">{{ formatMeasure(row.values[column.key], column.displayPrecision) }}</template>
         </el-table-column>
       </el-table>
     </el-dialog>
@@ -163,7 +183,7 @@ import type { BootstrapData, Indicator as IndicatorT, IndicatorOption as Indicat
 type BusinessParameter = { indicator_id: string; indicator_name: string; values: Record<string, string> }
 type ResultRow = { id: string; data_date: string; business_time?: string | null; period_type: 'point' | 'period'; period_start: string; period_end: string; business_params: BusinessParameter[]; dimensions: Record<string, unknown>; values: Record<string, unknown> }
 type QueryField = { name: string; alias: string; kind: 'dimension' | 'measure' }
-type MeasureColumn = { key: string; indicatorId: string; alias: string; indicatorName: string; indicatorCode: string }
+type MeasureColumn = { key: string; indicatorId: string; alias: string; indicatorName: string; indicatorCode: string; displayPrecision?: number | null }
 type MeasureGroup = { key: string; label: string; dimensions: string[]; columns: MeasureColumn[] }
 type DimensionOwner = { indicatorId: string; indicatorName: string }
 
@@ -244,6 +264,13 @@ function flattenTree(nodes: TreeNode[]): TreeNode[] { return nodes.flatMap((node
 function resetQuery() { startDate.value = ''; endDate.value = ''; dimensionFilters.value = {}; page.value = 1; total.value = 0; rows.value = []; dimensionColumns.value = []; dimensionOwners.value = {}; measureGroups.value = [] }
 function goBack() { window.history.back() }
 function formatValue(value: unknown) { return value === null || value === undefined || value === '' ? '' : String(value) }
+function formatMeasure(value: unknown, precision?: number | null) {
+  if (value === null || value === undefined || value === '') return ''
+  const num = Number(value)
+  if (!Number.isFinite(num)) return String(value)
+  if (precision === undefined || precision === null) return String(value)
+  return num.toFixed(precision)
+}
 function periodLabel(row: ResultRow) {
   if (row.business_time) return row.business_time
   return row.period_type === 'period' ? `${row.period_start} 至 ${row.period_end}` : row.period_start || row.data_date
@@ -255,6 +282,12 @@ function indicatorColorClass(indicatorId: string, kind: 'dimension' | 'measure')
 function dimensionClass(alias: string) {
   const owners = dimensionOwners.value[alias] || []
   return owners.length === 1 ? indicatorColorClass(owners[0].indicatorId, 'dimension') : 'result-dimension-shared'
+}
+function dimensionOwnerText(alias: string) {
+  const owners = dimensionOwners.value[alias] || []
+  if (!owners.length) return ''
+  if (owners.length > 1 && owners.length === selectedIds.value.length) return '全部指标共有'
+  return owners.map((owner) => owner.indicatorName).join('、')
 }
 function measureClass(column: MeasureColumn) { return indicatorColorClass(column.indicatorId, 'measure') }
 async function loadIndicatorDetails() {
@@ -312,7 +345,7 @@ function exportCsv() {
   const body = tableRows.value.map((row) => [
     periodLabel(row),
     ...dimensionColumns.value.map((column) => formatValue(row.dimensions[column])),
-    ...measureColumns.map((column) => formatValue(row.values[column.key])),
+    ...measureColumns.map((column) => formatMeasure(row.values[column.key], column.displayPrecision)),
   ])
   const csv = [header, ...body].map((line) => line.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\n')
   const blob = new Blob([`﻿${csv}`], { type: 'text/csv;charset=utf-8' })
@@ -351,6 +384,8 @@ function exportCsv() {
 .iq-result-empty b { color: var(--ink); }
 .iq-loading-mark { color: var(--muted); font-size: 20px; letter-spacing: 3px; }
 .iq-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 10px; }
+.result-table :deep(.col-header) { display: grid; gap: 1px; line-height: 1.25; }
+.result-table :deep(.col-owner) { font-size: 11px; color: #8a8f99; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .result-table :deep(.result-dimension-shared) { background-color: #f1f3f5; }
 .result-table :deep(.result-dimension-owner-0) { background-color: #eaf2ff; }
 .result-table :deep(.result-measure-owner-0) { background-color: #d7e6ff; }

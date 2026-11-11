@@ -17,7 +17,7 @@
         <el-form-item label="模型描述"><el-input v-model="sqlForm.description" type="textarea" :rows="2" /></el-form-item>
       </el-form>
       <div class="section-title-line"><h3>SQL 模板</h3></div>
-      <div class="muted report-dialog-tip">支持以下参数写法：<code>[:bgdate]</code> 单日期 / <code>[bgdate,edate]</code> 起止日期 / <code>:org_code</code> 具名绑定参数。</div>
+      <div class="muted report-dialog-tip">业务日期参数写法：<code>:svdate</code></div>
       <el-input v-model="sqlForm.sqlText" type="textarea" :rows="8" placeholder="SELECT cust_id, ... FROM cust_account WHERE data_date = [:bgdate]" />
 
       <div v-if="previewError" class="notice report-preview-error">{{ previewError }}</div>

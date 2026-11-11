@@ -251,9 +251,17 @@ def update_model_field(model_id: str, field_name: str, payload: FieldIn, db: Ses
     field = db.query(ModelField).filter(ModelField.model_id == model_id, ModelField.field_name == field_name).first()
     if not field:
         raise HTTPException(404, "字段不存在")
-    field.alias = payload.alias
-    field.role = payload.role
-    field.unit = payload.unit or ""
+    alias = (payload.alias or "").strip()
+    role = (payload.role or "").strip()
+    if not alias:
+        raise HTTPException(400, "字段业务名称不能为空")
+    if not role:
+        raise HTTPException(400, "字段角色不能为空")
+    if role not in {"dimension", "measure", "normal"}:
+        raise HTTPException(400, "字段角色只能是 dimension / measure / normal")
+    field.alias = alias
+    field.role = role
+    field.unit = (payload.unit or "").strip() or None
     field.is_date = payload.isDate
     field.is_org = payload.isOrg
     field.filterable = payload.filterable

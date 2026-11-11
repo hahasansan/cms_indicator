@@ -32,32 +32,40 @@
         </el-select>
       </el-form-item>
       <el-form-item v-if="form.scope==='selected'" label="指标" required>
-        <el-select v-model="form.indicatorId" style="width:100%"><el-option v-for="i in data.indicators" :key="i.id" :value="i.id" :label="`${i.name}（${i.code}）`" /></el-select>
+        <el-select v-model="form.indicatorId" style="width:100%" @change="applyIndicatorBizDateType"><el-option v-for="i in data.indicators" :key="i.id" :value="i.id" :label="`${i.name}（${i.code}）`" /></el-select>
       </el-form-item>
       <el-form-item v-if="form.scope==='category'" label="分类" required>
         <el-select v-model="form.categoryId" style="width:100%"><el-option v-for="c in data.indicatorCategories.filter(x=>x.id!=='root')" :key="c.id" :value="c.id" :label="c.name" /></el-select>
       </el-form-item>
       <el-form-item label="频率" required>
-        <el-select v-model="form.frequency" style="width:100%"><el-option value="日" label="日" /><el-option value="周" label="周" /><el-option value="月" label="月" /><el-option value="手动" label="手动" /></el-select>
+        <el-select v-model="form.frequency" style="width:100%"><el-option value="日" label="日" /><el-option value="周" label="周" /><el-option value="月" label="月" /><el-option value="季度" label="季度" /><el-option value="年" label="年" /><el-option value="手动" label="手动" /></el-select>
+        <div class="muted" style="font-size:12px;margin-top:4px">周固定在周日、月/季度/年固定在期末运行</div>
       </el-form-item>
       <el-form-item label="时间" required><el-input v-model="form.runTime" placeholder="例如 02:00" /></el-form-item>
       <el-form-item label="业务类型">
-        <el-select v-model="form.dateType" style="width:100%"><el-option value="balance" label="余额类（单日）" /><el-option value="period" label="时段类（区间）" /></el-select>
+        <el-select v-model="form.dateType" style="width:100%" :disabled="form.scope==='selected'"><el-option value="balance" label="余额类（单日）" /><el-option value="period" label="时段类（区间）" /></el-select>
       </el-form-item>
       <template v-if="form.dateType==='period'">
         <el-form-item label="开始日期" required>
-          <el-select v-model="form.startOption" style="width:100%"><el-option value="month_start" label="本月初" /><el-option value="prev_month_start" label="上月初" /><el-option value="year_start" label="年初" /><el-option value="month" label="月份" /><el-option value="specific" label="具体日期" /></el-select>
+          <el-select v-model="form.startOption" style="width:100%">
+            <el-option value="week_start" label="本周一" />
+            <el-option value="month_start" label="本月初" />
+            <el-option value="quarter_start" label="本季初" />
+            <el-option value="year_start" label="年初" />
+            <el-option value="month" label="月份" />
+            <el-option value="specific" label="具体日期" />
+          </el-select>
         </el-form-item>
         <el-form-item v-if="form.startOption==='month'" label="月份" required><el-input v-model="form.startMonth" type="month" /></el-form-item>
         <el-form-item v-if="form.startOption==='specific'" label="日期" required><el-input v-model="form.startSpecific" type="date" /></el-form-item>
         <el-form-item label="结束日期" required>
-          <el-select v-model="form.endOption" style="width:100%"><el-option value="today" label="今天" /><el-option value="t1" label="T-1" /><el-option value="last_workday" label="最近工作日" /><el-option value="specific" label="具体日期" /></el-select>
+          <el-select v-model="form.endOption" style="width:100%"><el-option value="today" label="调度日期" /><el-option value="t1" label="T-1" /><el-option value="last_workday" label="最近工作日" /><el-option value="specific" label="具体日期" /></el-select>
         </el-form-item>
         <el-form-item v-if="form.endOption==='specific'" label="日期" required><el-input v-model="form.endSpecific" type="date" /></el-form-item>
       </template>
       <template v-else>
         <el-form-item label="业务日期" required>
-          <el-select v-model="form.singleOption" style="width:100%"><el-option value="today" label="今天" /><el-option value="t1" label="T-1" /><el-option value="last_workday" label="最近工作日" /><el-option value="specific" label="具体日期" /></el-select>
+          <el-select v-model="form.singleOption" style="width:100%"><el-option value="today" label="今天" /><el-option value="last_workday" label="最近工作日" /><el-option value="specific" label="具体日期" /></el-select>
         </el-form-item>
         <el-form-item v-if="form.singleOption==='specific'" label="日期" required><el-input v-model="form.singleSpecific" type="date" /></el-form-item>
       </template>
@@ -103,6 +111,12 @@ const SchedulesPage = defineComponent({
       endOption: 'today',
       endSpecific: '',
     })
+    // 单个指标调度：业务类型跟随指标自身保存的业务时间参数
+    function applyIndicatorBizDateType() {
+      if (form.scope !== 'selected') return
+      const indicator = props.data.indicators.find((item) => item.id === form.indicatorId)
+      if (indicator?.bizDateType) form.dateType = indicator.bizDateType
+    }
     function openCreate() {
       form.name = ''
       form.indicatorId = props.data.indicators[0]?.id || ''
@@ -114,6 +128,7 @@ const SchedulesPage = defineComponent({
       form.singleOption = 'today'; form.singleSpecific = ''
       form.startOption = 'month_start'; form.startMonth = ''; form.startSpecific = ''
       form.endOption = 'today'; form.endSpecific = ''
+      applyIndicatorBizDateType()
       dialogOpen.value = true
     }
     function buildDateOption() {
@@ -142,8 +157,14 @@ const SchedulesPage = defineComponent({
       const s = props.data.schedules.find((x) => x.id === id)
       const body: Record<string, unknown> = {}
       if (s?.dateOption) body.dateOption = s.dateOption
-      const res = await requestApi<{ rowCount: number }>(`/api/schedules/${id}/runs`, { method: 'POST', body: toJsonBody(body) })
-      notify(`调度触发成功，写入 ${res.rowCount} 行`)
+      const res = await requestApi<{ total: number; success: number; failed: number; details: Array<{ indicatorCode: string; status: string; rowCount?: number; message?: string }> }>(`/api/schedules/${id}/runs`, { method: 'POST', body: toJsonBody(body) })
+      const rows = res.details.reduce((sum, d) => sum + (d.rowCount ?? 0), 0)
+      if (res.failed > 0) {
+        const firstFail = res.details.find((d) => d.status === 'failed')
+        notify(`调度完成：成功 ${res.success} 个，失败 ${res.failed} 个，写入 ${rows} 行${firstFail?.message ? `，首个失败原因：${firstFail.message}` : ''}`)
+      } else {
+        notify(`调度触发成功，写入 ${rows} 行`)
+      }
       emit('reload')
     }
     async function remove(id: string) {
@@ -151,7 +172,7 @@ const SchedulesPage = defineComponent({
       notify('调度已删除')
       emit('reload')
     }
-    return { dialogOpen, form, openCreate, save, run, remove }
+    return { dialogOpen, form, openCreate, applyIndicatorBizDateType, save, run, remove }
   },
 
 })

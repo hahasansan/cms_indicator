@@ -7,16 +7,27 @@
 
     <el-card shadow="never" class="compact-builder">
       <div class="compact-builder-body">
-        <div class="builder-section-title"><div><h2>指标基本信息</h2><p>业务人员只需要选择模型和字段，系统自动生成 SQL。</p></div></div>
-        <el-form label-position="top" class="form-grid builder-basic-grid">
-          <el-form-item label="指标名称" required><el-input v-model="name" placeholder="例如：各机构资金余额" /></el-form-item>
-          <el-form-item label="指标编码"><el-input :model-value="editing?.code || '保存后自动生成'" disabled /></el-form-item>
-          <el-form-item label="指标类型"><el-select v-model="indicatorType" style="width:100%"><el-option value="basic" label="基础指标" /><el-option value="derived" label="衍生指标" /></el-select></el-form-item>
-          <el-form-item label="所属分类"><el-tree-select v-model="categoryId" :data="categoryTreeForSelect" check-strictly :render-after-expand="false" style="width:100%" /></el-form-item>
-          <el-form-item v-if="filterConfigAvailable" label="数据模型"><el-select v-model="modelId" filterable :filter-method="filterModel" placeholder="选择或输入名称筛选" style="width:100%"><el-option v-for="modelItem in filteredModels" :key="modelItem.id" :value="modelItem.id" :label="`${modelItem.name}（${modelItem.table}）`" /></el-select></el-form-item>
-          <el-form-item label="业务口径" class="wide"><el-input v-model="bizCaliber" type="textarea" :rows="2" placeholder="用业务语言描述指标的计算口径" /></el-form-item>
+        <div class="builder-section-title">
+          <div><h2>指标基本信息</h2></div>
+        </div>
+        <el-form label-position="left" label-width="120px" class="basic-form-grid">
+          <el-form-item label="指标名称" required class="basic-span-2"><el-input v-model="name" placeholder="例如：各机构资金余额" /></el-form-item>
+          <el-form-item label="指标类型"><el-select v-model="indicatorType"><el-option value="basic" label="基础指标" /><el-option value="derived" label="衍生指标" /></el-select></el-form-item>
+          <el-form-item label="所属分类"><el-tree-select v-model="categoryId" :data="categoryTreeForSelect" check-strictly :render-after-expand="false" /></el-form-item>
+          <el-form-item v-if="filterConfigAvailable" label="数据模型" class="basic-span-2"><el-select v-model="modelId" filterable :filter-method="filterModel" placeholder="选择或输入名称筛选"><el-option v-for="modelItem in filteredModels" :key="modelItem.id" :value="modelItem.id" :label="`${modelItem.name}（${modelItem.table}）`" /></el-select></el-form-item>
+          <el-form-item v-if="filterConfigAvailable" label="业务时间类型" required>
+            <el-select v-model="bizDateType" placeholder="请选择">
+              <el-option value="balance" label="余额类（单日）" />
+              <el-option value="period" label="时段类（区间）" />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="filterConfigAvailable" label="业务时间字段" required class="basic-span-2">
+            <el-select v-model="bizDateField" placeholder="选择日期型字段" :disabled="!bizDateType" filterable>
+              <el-option v-for="field in bizDateFields" :key="field.name" :value="field.name" :label="`${field.alias}（${field.name}）`" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="业务口径" class="basic-span-all"><el-input v-model="bizCaliber" type="textarea" :rows="2" placeholder="用业务语言描述指标的计算口径" /></el-form-item>
         </el-form>
-
         <div v-if="filterConfigAvailable" class="builder-config-grid">
           <section class="builder-section">
             <div class="section-title-line"><h3>维度字段</h3><span class="muted">用于分组展示</span></div>
@@ -31,34 +42,91 @@
           </section>
 
           <section class="builder-section measure-section">
-            <div class="section-title-line"><div><h3>度量字段</h3><p class="section-help">度量是指标最后要展示的数值。按"选择字段 → 选择统计方式 → 填写结果名称"配置。</p></div><el-button size="small" @click="addMeasure">添加度量</el-button></div>
-            <div class="measure-config-guide"><div><b>字段</b><span>模型中的数值列</span></div><div><b>统计方式</b><span>如何汇总数据</span></div><div><b>结果名称</b><span>报表中显示的列名</span></div></div>
+            <div class="section-title-line"><div><h3>度量字段</h3><p class="section-help">可直接选择模型度量字段，或用公式计算；两种方式都可选择统计方式。</p></div><div><el-button size="small" @click="refreshMeasureFunctions">刷新公式</el-button><el-button size="small" @click="addMeasure">添加度量</el-button></div></div>
             <div v-for="(measure, index) in measures" :key="index" class="measure-config-row">
-              <el-select v-model="measure.fieldName" placeholder="字段" @change="(val: string) => onMeasureFieldChange(measure, val)">
+              <el-radio-group :model-value="measure.sourceType || (measure.functionId ? 'formula' : 'field')" size="small" @change="(source: string | number | boolean) => setMeasureSource(measure, source === 'formula' ? 'formula' : 'field')">
+                <el-radio-button label="field">模型字段</el-radio-button>
+                <el-radio-button label="formula">公式计算</el-radio-button>
+              </el-radio-group>
+              <el-select
+                v-if="(measure.sourceType || (measure.functionId ? 'formula' : 'field')) === 'field'"
+                v-model="measure.fieldName"
+                placeholder="选择模型度量字段"
+                @change="(fieldName: string) => onMeasureFieldChange(measure, fieldName)"
+              >
                 <el-option v-for="field in measureFields" :key="`${field.modelId}:${field.name}`" :value="field.name" :label="`${field.alias}（${field.name}）`" />
               </el-select>
-              <el-select v-model="measure.aggFunc" placeholder="统计方式"><el-option v-for="agg in ['SUM','AVG','MAX','MIN','COUNT','NONE']" :key="agg" :value="agg" :label="agg" /></el-select>
-              <el-input v-model="measure.alias" placeholder="例如：资金余额" />
+              <el-select v-else v-model="measure.functionId" placeholder="选择公式" @change="(id: string) => onMeasureFunctionChange(measure, id)">
+                <el-option v-for="formula in measureFunctions" :key="formula.id" :value="formula.id" :label="`${formula.name}（${formula.parameterCount} 个操作数）`" />
+              </el-select>
+              <el-input v-model="measure.alias" placeholder="结果名称，例如：资金余额" />
               <el-button type="danger" link @click="removeMeasure(index)">×</el-button>
-              <div v-if="canConfigureDerivatives" class="measure-derivatives">
-                <div class="measure-derivatives-title">衍生度量配置（可选，与基础度量绑定并随指标一起生成）</div>
-                <small class="muted">运行时按所选业务日期参数查询余额快照；较上日按自然日计算。</small>
-                <div class="derivative-option-group">
-                  <b>业务日期衍生</b>
-                  <el-checkbox-group v-model="measure.derivatives">
-                    <el-checkbox v-for="option in timeDerivatives" :key="option.value" :value="option.value">{{ option.label }}</el-checkbox>
-                  </el-checkbox-group>
+              <div class="measure-aggregation">
+                <span>统计方式</span>
+                <el-select v-model="measure.aggFunc" placeholder="选择统计方式">
+                  <el-option value="SUM" label="SUM 求和" />
+                  <el-option value="AVG" label="AVG 平均值" />
+                  <el-option value="MAX" label="MAX 最大值" />
+                  <el-option value="MIN" label="MIN 最小值" />
+                  <el-option value="COUNT" label="COUNT 计数" />
+                  <el-option value="NONE" label="不聚合" />
+                </el-select>
+              </div>
+              <div class="measure-aggregation">
+                <span>小数位数</span>
+                <el-input-number
+                  v-model="measure.displayPrecision"
+                  :min="0"
+                  :max="10"
+                  :step="1"
+                  controls-position="right"
+                  size="small"
+                  placeholder="不限制"
+                />
+              </div>
+              <div v-if="isFormulaMeasure(measure) && measure.functionId && activeFormulaFunction(measure)" class="formula-inputs">
+                <div class="formula-overview">
+                  <div class="formula-line"><span class="formula-label">公式模板</span><code>{{ activeFormula(measure) }}</code></div>
+                  <div v-if="activeFormulaFunction(measure)?.description" class="formula-description">{{ activeFormulaFunction(measure)?.description }}</div>
+                  <div class="formula-line"><span class="formula-label">代入结果</span><code>{{ formulaWithInputs(measure) }}</code></div>
                 </div>
-                <div class="derivative-option-group">
-                  <b>统计衍生</b>
-                  <el-checkbox-group v-model="measure.derivatives">
-                    <el-checkbox v-for="option in statisticalDerivatives" :key="option.value" :value="option.value">{{ option.label }}</el-checkbox>
-                  </el-checkbox-group>
+                <div class="formula-operands">
+                  <div v-for="(input, inputIndex) in measure.inputs || []" :key="inputIndex" class="formula-operand-row">
+                    <span class="operand-token">{{ '{' + (inputIndex + 1) + '}' }}</span>
+                    <span class="operand-meaning">{{ formulaParamName(measure, inputIndex) || '未维护含义' }}</span>
+                    <el-select v-model="input.fieldName" :placeholder="operandPlaceholder(measure, inputIndex)">
+                      <el-option v-for="field in formulaFields" :key="`${field.modelId}:${field.name}`" :value="field.name" :label="`${field.alias}（${field.name}）`" />
+                    </el-select>
+                    <small class="operand-selected">{{ selectedOperandField(input) }}</small>
+                  </div>
+                </div>
+                <div v-if="formulaMissingParamNames(measure)" class="formula-tip">
+                  该公式尚未维护操作数含义，建议前往<el-button link type="primary" @click="openFunctionManagement">度量公式管理</el-button>补充，业务人员才能看懂每个字段代表什么。
                 </div>
               </div>
+              <div v-else-if="!isFormulaMeasure(measure) && !measure.functionId" class="formula-inputs muted">
+                {{ measureFunctions.length ? '请选择公式。' : '请先在“度量公式管理”中创建公式。' }}
+              </div>
+              <div v-else-if="!isFormulaMeasure(measure)" class="formula-inputs muted">
+                {{ measureFields.length ? '选择模型中的度量字段作为计算来源。' : '当前模型没有可用的度量字段。' }}
+              </div>
+              <div v-if="canConfigureDerivatives" class="measure-derivatives-summary">
+                <span class="measure-derivatives-text">
+                  衍生度量：<b>{{ measure.derivatives?.length ? `${measure.derivatives.length} 项已选` : '未配置' }}</b>
+                  <small class="muted">可选，与基础度量绑定并随指标一起生成</small>
+                </span>
+                <el-button size="small" @click="openDerivativeDialog(index)">衍生度量配置</el-button>
+              </div>
+              <div v-if="needsBizDays(measure) && !bizDateType" class="formula-system-note warning">
+                ⚠️ 该公式使用了 <code>{__BIZ_DAYS__}</code> 系统占位符，需先在上方「业务时间」配置业务日期类型和字段
+              </div>
+              <div v-else-if="needsBizDays(measure) && bizDateType" class="formula-system-note">
+                💡 <code>{__BIZ_DAYS__}</code> 将按 {{ bizDateType === 'period' ? '时段区间天数' : '1（余额类单日值不变）' }} 计算
+              </div>
             </div>
-            <div v-if="!measures.length" class="empty compact-empty">请点击"添加度量"，再选择要统计的数值字段。</div>
-            <div class="measure-example"><b>配置示例：</b><span><strong>余额</strong> + <strong>SUM</strong> + <strong>资金余额</strong> = 按维度汇总后的资金余额</span><span><strong>金额</strong> + <strong>AVG</strong> + <strong>平均金额</strong> = 按维度计算平均金额</span></div>
+            <div v-if="!measures.length" class="empty compact-empty">请点击“添加度量”，选择公式并绑定公式字段。</div>
+            <div class="measure-example"><b>公式示例：</b><span><strong>{1} * {2}</strong> 可计算数量乘单价，再选择 SUM 求和</span><span><strong>{1} / NULLIF({2}, 0)</strong> 可计算多列比率，再选择所需统计方式</span><span><strong>{1} / NULLIF({__BIZ_DAYS__}, 0)</strong> 可计算区间日均，{__BIZ_DAYS__} 为系统内置的业务区间天数</span></div>
+            <div v-if="!measureFunctions.length" class="measure-example"><el-button link type="primary" @click="openFunctionManagement">前往度量公式管理</el-button></div>
           </section>
         </div>
 
@@ -68,7 +136,7 @@
             <div v-for="(filter, index) in filters" :key="index" class="filter-config-row">
               <el-select v-if="index" v-model="filter.joinWith"><el-option value="AND" label="AND" /><el-option value="OR" label="OR" /></el-select>
               <span v-else class="filter-first">当</span>
-              <el-select v-model="filter.fieldName" @change="(val: string) => onFilterFieldChange(filter, val)">
+              <el-select v-model="filter.fieldName" filterable placeholder="输入中文名或字段名搜索" @change="(val: string) => onFilterFieldChange(filter, val)">
                 <el-option-group label="维度">
                   <el-option v-for="field in dimensionFields" :key="`dim-${field.modelId}:${field.name}`" :value="field.name" :label="`${field.alias}（${field.name}）`" />
                 </el-option-group>
@@ -115,7 +183,25 @@
         </div>
 
         <section class="builder-section trial-section" ref="trialResultRef">
-          <div class="section-title-line"><h3>试算</h3><el-button size="small" type="primary" :loading="loading" @click="trial">试算</el-button></div>
+          <div class="section-title-line"><h3>试算</h3>
+            <div class="trial-actions">
+              <template v-if="filterConfigAvailable && bizDateType">
+                <span class="trial-date-label">业务日期：</span>
+                <el-form-item v-if="bizDateType === 'balance'" label-width="0" class="trial-date-item">
+                  <el-date-picker v-model="trialBizDate" type="date" format="YYYY-MM-DD" value-format="YYYY-MM-DD" placeholder="选择业务日期" />
+                </el-form-item>
+                <template v-else>
+                  <el-form-item label-width="0" class="trial-date-item">
+                    <el-date-picker v-model="trialBizStart" type="date" format="YYYY-MM-DD" value-format="YYYY-MM-DD" placeholder="起" />
+                  </el-form-item>
+                  <el-form-item label-width="0" class="trial-date-item">
+                    <el-date-picker v-model="trialBizEnd" type="date" format="YYYY-MM-DD" value-format="YYYY-MM-DD" placeholder="止" />
+                  </el-form-item>
+                </template>
+              </template>
+              <el-button size="small" type="primary" :loading="loading" :disabled="filterConfigAvailable && bizDateType && !trialDateReady" @click="trial">试算</el-button>
+            </div>
+          </div>
           <div v-if="trialError" class="trial-error">试算失败：{{ trialError }}</div>
           <div v-if="trialDone && trialRows.length" class="trial-result">
             <div class="trial-result-title">试算结果（前 {{ trialRows.length }} 行）</div>
@@ -135,13 +221,36 @@
         <div class="compact-builder-footer"><span class="muted">已配置 {{ dimensions.length }} 个维度、{{ measures.length }} 个度量、{{ filters.length }} 个条件</span><el-button size="small" @click="toggleSqlPreview">{{ showSqlPreview ? '隐藏 SQL 预览' : '显示 SQL 预览' }}</el-button></div>
       </div>
     </el-card>
+
+    <el-dialog v-model="derivativeDialogOpen" :title="derivativeDialogTitle" width="640px" append-to-body>
+      <div class="derivative-dialog">
+        <div class="derivative-dialog-tip">衍生度量会与当前基础度量绑定，并随指标一起生成；不配置则只生成基础度量。</div>
+        <section class="derivative-block">
+          <div class="derivative-block-head"><b>业务日期衍生</b><small>运行时按所选业务日期参数查询余额快照；较上日按自然日计算。</small></div>
+          <el-checkbox-group v-model="derivativeDraft" class="derivative-check-group">
+            <el-checkbox v-for="option in timeDerivatives" :key="option.value" :value="option.value">{{ option.label }}</el-checkbox>
+          </el-checkbox-group>
+        </section>
+        <section class="derivative-block">
+          <div class="derivative-block-head"><b>统计衍生</b><small>按自然月、季、年对基础度量做累计、均值或首末值计算。</small></div>
+          <el-checkbox-group v-model="derivativeDraft" class="derivative-check-group">
+            <el-checkbox v-for="option in statisticalDerivatives" :key="option.value" :value="option.value">{{ option.label }}</el-checkbox>
+          </el-checkbox-group>
+        </section>
+      </div>
+      <template #footer>
+        <el-button @click="derivativeDraft = []">清空</el-button>
+        <el-button @click="derivativeDialogOpen = false">取消</el-button>
+        <el-button type="primary" @click="confirmDerivativeDialog">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, inject, nextTick, ref, watch } from 'vue'
+import { computed, inject, nextTick, onMounted, ref, watch } from 'vue'
 import { api, jsonBody } from '../../api'
-import type { BootstrapData, DataModel, DictItem, Indicator, IndicatorConfig, IndicatorMeasure } from '../../types'
+import type { BootstrapData, DataModel, DictItem, Indicator, IndicatorConfig, IndicatorMeasure, MeasureFunction } from '../../types'
 
 type IndicatorKind = NonNullable<IndicatorConfig['indicatorType']>
 type Filter = NonNullable<IndicatorConfig['filters']>[number]
@@ -160,6 +269,8 @@ const indicatorType = ref<IndicatorKind>('basic')
 const modelId = ref(editing.value?.modelId || props.data.models[0]?.id || '')
 const categoryId = ref(editing.value?.categoryId || props.data.indicatorCategories.find((item) => item.id !== 'root' && item.enabled)?.id || 'root')
 const bizCaliber = ref('')
+const bizDateType = ref<'' | 'balance' | 'period'>('')
+const bizDateField = ref('')
 type DimItem = Exclude<IndicatorConfig['dimensions'], undefined>[number]
 const dimKey = (modelId?: string, fieldName?: string) => `${modelId || ''}:${fieldName || ''}`
 const dimensionKeys = ref<string[]>([])
@@ -172,6 +283,16 @@ const dimensions = computed<IndicatorConfig['dimensions']>(() => dimensionKeys.v
   return { fieldName: found?.name || fname, alias: found?.alias || fname, modelId: mid || '' }
 }).filter((item) => item.fieldName))
 const measures = ref<IndicatorMeasure[]>([])
+const measureFunctions = ref<MeasureFunction[]>([])
+const measureFunctionById = computed(() => Object.fromEntries(measureFunctions.value.map((formula) => [formula.id, formula])))
+async function refreshMeasureFunctions() {
+  try {
+    measureFunctions.value = await api<MeasureFunction[]>('/api/measure-functions')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : String(error))
+  }
+}
+onMounted(refreshMeasureFunctions)
 const filters = ref<Filter[]>([])
 const baseIndicatorIds = ref<string[]>(['', ''])
 const derivedOperator = ref<NonNullable<NonNullable<IndicatorConfig['derived']>['operator']>>('copy')
@@ -222,6 +343,8 @@ function syncFormFromDetail() {
   const cfg = detail.config
   if (cfg.indicatorType) indicatorType.value = cfg.indicatorType
   bizCaliber.value = cfg.basic?.bizCaliber || ''
+  bizDateType.value = cfg.bizDate?.type || ''
+  bizDateField.value = cfg.bizDate?.field || ''
   const initialDims = cfg.dimensions?.map((item) => ({ fieldName: item.fieldName, alias: item.alias, modelId: item.modelId })) || []
   dimensionKeys.value = initialDims.map((item) => dimKey(item.modelId, item.fieldName))
   dimStore.value = new Map(initialDims.map((item) => [dimKey(item.modelId, item.fieldName), item as DimItem]))
@@ -242,6 +365,16 @@ const trialKeys = computed(() => trialRows.value.length ? Object.keys(trialRows.
 const trialError = ref('')
 const trialDone = ref(false)
 const trialResultRef = ref<HTMLElement | null>(null)
+// 试算用业务日期
+const trialBizDate = ref('')
+const trialBizStart = ref('')
+const trialBizEnd = ref('')
+const trialDateReady = computed(() => {
+  if (!bizDateType.value) return true
+  if (bizDateType.value === 'balance') return !!trialBizDate.value
+  return !!trialBizStart.value && !!trialBizEnd.value
+})
+watch(bizDateType, () => { trialBizDate.value = ''; trialBizStart.value = ''; trialBizEnd.value = '' })
 
 const model = computed(() => modelDetail.value)
 // 数据模型下拉筛选：按名称/表名"以输入文字开头"匹配
@@ -263,14 +396,33 @@ const dimensionFields = computed<FieldWithSource[]>(() => {
 })
 const canConfigureDerivatives = computed(() => {
   const sourceType = model.value?.sourceType
-  return (sourceType === 'report' || sourceType === 'custom_sql') && model.value?.bizDateType === 'balance' && !!model.value.sourceTemplate
+  return (sourceType === 'report' || sourceType === 'custom_sql') && bizDateType.value === 'balance' && !!model.value?.sourceTemplate
 })
+const bizDateFields = computed(() => (model.value?.fields || []).filter((field) => field.isDate))
+function applyModelBizDateDefaults(detail: DataModel) {
+  bizDateType.value = detail.bizDateType || ''
+  bizDateField.value = detail.bizDateField || ''
+}
 const measureFields = computed<FieldWithSource[]>(() => {
   const main = model.value
   if (!main) return []
   return main.fields.filter((field) => field.role === 'measure').map((field) => ({
     name: field.name, alias: field.alias, dataType: field.dataType,
     modelId: main.id, modelName: main.name, source: 'main' as const, dictSetId: field.dictSetId ?? null,
+  }))
+})
+const formulaFields = computed<FieldWithSource[]>(() => {
+  const main = model.value
+  if (!main) return []
+  return main.fields.map((field) => ({
+    name: field.name,
+    alias: field.alias,
+    dataType: field.dataType,
+    modelId: main.id,
+    modelName: main.name,
+    source: 'main' as const,
+    dictSetId: field.dictSetId ?? null,
+    isDate: field.isDate,
   }))
 })
 const filterConfigAvailable = computed(() => indicatorType.value === 'basic')
@@ -299,14 +451,94 @@ const statisticalDerivatives = [
   { value: 'year_end_value', label: '年末值' },
 ]
 
-// 度量/筛选切换字段时，自动写入 modelId + 默认 alias
+// ===================== 衍生度量弹窗 =====================
+const derivativeDialogOpen = ref(false)
+const derivativeDialogIndex = ref(-1)
+const derivativeDraft = ref<string[]>([])
+const derivativeDialogTitle = computed(() => {
+  const measure = measures.value[derivativeDialogIndex.value]
+  const alias = measure?.alias?.trim()
+  return alias ? `衍生度量配置 · ${alias}` : '衍生度量配置'
+})
+function openDerivativeDialog(index: number) {
+  derivativeDialogIndex.value = index
+  derivativeDraft.value = [...(measures.value[index]?.derivatives || [])]
+  derivativeDialogOpen.value = true
+}
+function confirmDerivativeDialog() {
+  const measure = measures.value[derivativeDialogIndex.value]
+  if (measure) measure.derivatives = [...derivativeDraft.value]
+  derivativeDialogOpen.value = false
+}
+
+// ===================== 公式操作数含义 =====================
+const isFormulaMeasure = (measure: IndicatorMeasure) =>
+  (measure.sourceType || (measure.functionId ? 'formula' : 'field')) === 'formula'
+const activeFormulaFunction = (measure: IndicatorMeasure): MeasureFunction | undefined =>
+  measure.functionId ? measureFunctionById.value[measure.functionId] : undefined
+const activeFormula = (measure: IndicatorMeasure) =>
+  measure.formula || activeFormulaFunction(measure)?.formula || ''
+// 操作数含义按 {1}、{2}… 顺序对应到公式参数列表
+const formulaParamName = (measure: IndicatorMeasure, index: number) =>
+  (activeFormulaFunction(measure)?.parameters || [])[index] || ''
+function operandPlaceholder(measure: IndicatorMeasure, index: number) {
+  const meaning = formulaParamName(measure, index)
+  return meaning ? `选择代表「${meaning}」的字段` : `选择第 ${index + 1} 个操作数对应的字段`
+}
+function findOperandField(input: { fieldName: string; modelId?: string }) {
+  return formulaFields.value.find((field) => field.name === input.fieldName && (!input.modelId || field.modelId === input.modelId))
+}
+const selectedOperandField = (input: { fieldName: string; modelId?: string }) => {
+  const field = findOperandField(input)
+  return field ? `已选：${field.alias}` : '未选择字段'
+}
+// 把占位符替换为已选字段的业务名称，直观展示公式最终含义
+function formulaWithInputs(measure: IndicatorMeasure) {
+  const formula = activeFormula(measure)
+  if (!formula) return ''
+  return formula.replace(/\{(\d+)\}/g, (token, number: string) => {
+    const input = measure.inputs?.[Number(number) - 1]
+    if (!input?.fieldName) return token
+    return findOperandField(input)?.alias || input.fieldName
+  })
+}
+function formulaMissingParamNames(measure: IndicatorMeasure) {
+  const count = measure.inputs?.length || 0
+  const parameters = activeFormulaFunction(measure)?.parameters || []
+  return count > 0 && Array.from({ length: count }, (_, index) => parameters[index] || '').every((name) => !name)
+}
+function needsBizDays(measure: IndicatorMeasure): boolean {
+  const formula = activeFormula(measure)
+  return /\{__BIZ_DAYS__\}/.test(formula)
+}
+
+function onMeasureFunctionChange(measure: IndicatorMeasure, functionId: string) {
+  const formula = measureFunctionById.value[functionId]
+  if (!formula) return
+  measure.functionId = formula.id
+  measure.sourceType = 'formula'
+  measure.formula = formula.formula
+  measure.fieldName = ''
+  measure.aggFunc = 'NONE'
+  measure.inputs = Array.from({ length: formula.parameterCount }, () => ({ fieldName: '', modelId: modelId.value }))
+  if (!measure.alias) measure.alias = formula.name
+}
+function setMeasureSource(measure: IndicatorMeasure, source: 'field' | 'formula') {
+  measure.sourceType = source
+  measure.fieldName = ''
+  measure.modelId = modelId.value
+  measure.functionId = ''
+  measure.formula = ''
+  measure.inputs = []
+  measure.aggFunc = 'SUM'
+  if (source === 'formula') return
+}
 function onMeasureFieldChange(measure: IndicatorMeasure, fieldName: string) {
-  const field = measureFields.value.find((f) => f.name === fieldName)
+  const field = measureFields.value.find((item) => item.name === fieldName)
   if (!field) return
+  measure.sourceType = 'field'
   measure.modelId = field.modelId
-  if (!measure.alias || measureFields.value.some((f) => f.name === measure.alias)) {
-    measure.alias = field.alias
-  }
+  if (!measure.alias) measure.alias = field.alias
 }
 function onFilterFieldChange(filter: Filter, fieldName: string) {
   const field = [...dimensionFields.value, ...measureFields.value].find((f) => f.name === fieldName)
@@ -383,8 +615,20 @@ watch(modelDetail, (detail, oldDetail) => {
     dimensionKeys.value = []
     dimStore.value = new Map()
     measures.value = []
-    if (!editing.value) filters.value = []
+    if (!editing.value) {
+      filters.value = []
+      bizDateType.value = ''
+      bizDateField.value = ''
+    }
     return
+  }
+  // 业务时间参数默认取模型：新增指标、切换模型、或老指标尚未保存该配置时回填
+  if (
+    (oldDetail && oldDetail.id !== detail.id)
+    || !editing.value
+    || (!bizDateType.value && !bizDateField.value)
+  ) {
+    applyModelBizDateDefaults(detail)
   }
   if (editing.value) {
     // 编辑场景：模型详情就绪后，对关联了码值集的筛选条件预加载码值项
@@ -422,14 +666,54 @@ watch(dimensionKeys, (keys) => {
   if (deduped.length !== keys.length) dimensionKeys.value = deduped
 }, { immediate: true })
 watch(() => props.data.models, () => { if (!measures.value.length) measures.value = defaultMeasures() }, { immediate: true })
+watch(measureFunctions, (functions) => {
+  if (functions.length && modelDetail.value && !editing.value && !measures.value.length) {
+    measures.value = defaultMeasures()
+  }
+})
 
 function getMeasures(indicator: Indicator): IndicatorMeasure[] {
   const configured = indicator.config.measures ?? (indicator.config.measure ? [indicator.config.measure] : [])
-  return configured.map((measure) => ({ ...measure, derivatives: measure.derivatives || [] }))
+  return configured.map((measure) => ({
+    ...measure,
+    sourceType: measure.sourceType || (measure.functionId ? 'formula' : 'field'),
+    aggFunc: measure.aggFunc || (measure.functionId ? 'NONE' : 'SUM'),
+    inputs: measure.inputs?.map((item) => ({ ...item })) || [],
+    derivatives: measure.derivatives || [],
+  }))
 }
-function defaultMeasures(): IndicatorMeasure[] { const field = measureFields.value[0]; return field ? [{ fieldName: field.name, alias: field.alias, aggFunc: 'SUM', derivatives: [] }] : [] }
-function addMeasure() { const field = measureFields.value[0]; if (field) measures.value.push({ fieldName: field.name, alias: field.alias, aggFunc: 'SUM', derivatives: [] }) }
+function defaultMeasures(): IndicatorMeasure[] {
+  const field = measureFields.value[0]
+  if (field) {
+    return [{
+      fieldName: field.name,
+      modelId: field.modelId,
+      aggFunc: 'SUM',
+      sourceType: 'field',
+      alias: field.alias,
+      functionId: '',
+      formula: '',
+      inputs: [],
+      derivatives: [],
+    }]
+  }
+  const formula = measureFunctions.value[0]
+  return formula ? [{
+    fieldName: '',
+    aggFunc: 'NONE',
+    sourceType: 'formula',
+    functionId: formula.id,
+    formula: formula.formula,
+    inputs: Array.from({ length: formula.parameterCount }, () => ({ fieldName: '', modelId: modelId.value })),
+    alias: formula.name,
+    derivatives: [],
+  }] : []
+}
+function addMeasure() { measures.value.push({ fieldName: '', aggFunc: 'SUM', alias: '', functionId: '', formula: '', inputs: [], derivatives: [] }) }
 function removeMeasure(index: number) { measures.value.splice(index, 1) }
+function openFunctionManagement() {
+  window.open('/indicator-center/functions', '_blank', 'noopener')
+}
 function addFilter() {
   const field = model.value?.fields[0]
   if (!field) return
@@ -448,14 +732,16 @@ function dedupDims(list: IndicatorConfig['dimensions']): IndicatorConfig['dimens
   return result
 }
 function collect(): IndicatorConfig {
-  const config = { modelId: modelId.value, indicatorType: indicatorType.value, dimensions: dedupDims(dimensions.value.map((dim) => ({ fieldName: dim.fieldName, alias: dim.alias, modelId: dim.modelId }))), measures: measures.value.map((m) => ({ ...m, derivatives: m.derivatives || [], modelId: m.modelId })), filters: filters.value, baseIndicatorIds: baseIndicatorIds.value.filter((id) => id), derived: { operator: derivedOperator.value as 'copy' | 'sum' | 'difference' | 'ratio', alias: name.value || '衍生指标值' }, basic: { bizCaliber: bizCaliber.value }, schedule: { frequency: scheduleFrequency.value, resultTable: resultTable.value } }
+  const config = { modelId: modelId.value, indicatorType: indicatorType.value, dimensions: dedupDims(dimensions.value.map((dim) => ({ fieldName: dim.fieldName, alias: dim.alias, modelId: dim.modelId }))), measures: measures.value.map((m) => ({ ...m, displayPrecision: m.displayPrecision ?? undefined, derivatives: m.derivatives || [], modelId: m.modelId })), filters: filters.value, baseIndicatorIds: baseIndicatorIds.value.filter((id) => id), derived: { operator: derivedOperator.value as 'copy' | 'sum' | 'difference' | 'ratio', alias: name.value || '衍生指标值' }, basic: { bizCaliber: bizCaliber.value }, bizDate: { type: bizDateType.value, field: bizDateField.value }, schedule: { frequency: scheduleFrequency.value, resultTable: resultTable.value } }
   return config
 }
 async function preview() { loading.value = true; try { const result = await api<{ sqlText: string }>('/api/sql/previews', { method: 'POST', body: jsonBody({ config: collect() }) }); sqlText.value = result.sqlText } catch (error) { notify(error instanceof Error ? error.message : String(error)) } finally { loading.value = false } }
 async function trial() {
   loading.value = true; trialDone.value = false; trialError.value = ''
   try {
-    const result = await api<{ sqlText: string; rows: Record<string, unknown>[] }>('/api/sql/trials', { method: 'POST', body: jsonBody({ config: collect() }) })
+    const config = collect()
+    const dateOption = buildTrialDateOption()
+    const result = await api<{ sqlText: string; rows: Record<string, unknown>[] }>('/api/sql/trials', { method: 'POST', body: jsonBody({ config, dateOption }) })
     trialRows.value = result.rows
   } catch (error) {
     trialRows.value = []
@@ -466,15 +752,38 @@ async function trial() {
     nextTick(() => trialResultRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
   }
 }
+function buildTrialDateOption(): Record<string, unknown> | undefined {
+  if (!bizDateType.value) return undefined
+  if (bizDateType.value === 'balance' && trialBizDate.value) {
+    return { type: 'balance', single: { option: 'specific', value: trialBizDate.value } }
+  }
+  if (bizDateType.value === 'period' && trialBizStart.value && trialBizEnd.value) {
+    return {
+      type: 'period',
+      start: { option: 'specific', value: trialBizStart.value },
+      end: { option: 'specific', value: trialBizEnd.value },
+    }
+  }
+  return undefined
+}
 function toggleSqlPreview() { showSqlPreview.value = !showSqlPreview.value }
 async function save() {
   if (!name.value.trim()) { notify('请填写指标名称'); return }
   if (!modelId.value && indicatorType.value === 'basic') { notify('请选择数据模型'); return }
-  if (indicatorType.value === 'basic' && measures.value.some((measure) => measure.derivatives?.length)) {
-    if (!canConfigureDerivatives.value) {
-      notify('衍生度量仅适用于配置了业务日期参数的余额类报表模型')
-      return
-    }
+  if (indicatorType.value === 'basic' && bizDateType.value) {
+    if (!bizDateField.value) { notify('请选择业务时间字段'); return }
+  }
+  if (indicatorType.value === 'basic' && measures.value.some((measure) => measure.derivatives?.length) && !canConfigureDerivatives.value) {
+    notify('衍生度量仅适用于配置了业务日期参数的余额类指标')
+    return
+  }
+  if (indicatorType.value === 'basic' && measures.value.some((measure) => (
+    measure.sourceType === 'formula'
+      ? !measure.functionId || !measure.alias.trim() || !measure.inputs?.length || measure.inputs.some((input) => !input.fieldName)
+      : !measure.fieldName
+  ))) {
+    notify('请为每个度量选择模型字段，或选择公式并绑定公式字段')
+    return
   }
   if (indicatorType.value === 'derived') {
     if (!baseIndicatorIds.value[0]) { notify('请选择基础指标 A'); return }
@@ -506,9 +815,9 @@ async function save() {
 
 .compact-builder-body {
   width: 100%;
-  padding: 20px;
+  padding: 24px;
   display: grid;
-  gap: 14px;
+  gap: 18px;
 }
 
 .builder-section-title {
@@ -530,17 +839,36 @@ async function save() {
   font-size: 12px;
 }
 
-.builder-basic-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.basic-meta {
+  font-size: 12px;
+  text-align: right;
 }
 
-.form-grid {
+.basic-form-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px 24px;
 }
 
-.form-grid .wide {
+.basic-form-grid :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
+.basic-form-grid :deep(.el-form-item__content) {
+  min-width: 0;
+}
+
+.basic-form-grid :deep(.el-input),
+.basic-form-grid :deep(.el-select),
+.basic-form-grid :deep(.el-tree-select) {
+  width: 100%;
+}
+
+.basic-span-2 {
+  grid-column: span 2;
+}
+
+.basic-span-all {
   grid-column: 1 / -1;
 }
 
@@ -594,39 +922,175 @@ async function save() {
 }
 
 .measure-config-row {
-  grid-template-columns: minmax(0, 1fr) 90px minmax(0, 1fr) 32px;
+  grid-template-columns: minmax(140px, 1fr) minmax(160px, 1fr) minmax(160px, 1fr) 32px;
 }
 
-.measure-derivatives-title,
-.derivative-option-group > b {
+.measure-aggregation {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.measure-aggregation .el-select {
+  width: 180px;
+}
+
+.measure-derivatives-summary {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  border: 1px dashed #dbe8f5;
+  border-radius: 6px;
+  background: #f8fbff;
   color: #475d74;
   font-size: 12px;
-  font-weight: 700;
 }
 
-.measure-derivatives {
+.measure-derivatives-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.measure-derivatives-text small {
+  font-weight: 400;
+}
+
+.formula-inputs {
   grid-column: 1 / -1;
   display: grid;
   gap: 8px;
-  margin: 0 0 12px;
-  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.formula-overview {
+  display: grid;
+  gap: 5px;
+  padding: 8px 10px;
   border: 1px solid #dbe8f5;
   border-radius: 6px;
-  background: #f7fbff;
+  background: #f5faff;
 }
 
-.derivative-option-group {
+.formula-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.formula-line code {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #fff;
+  color: #2c5879;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.formula-label {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.formula-description {
+  padding-left: 64px;
+  color: #52647a;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.formula-operands {
   display: grid;
-  gap: 4px;
+  gap: 6px;
 }
 
-.derivative-option-group .el-checkbox-group {
+.formula-operand-row {
+  display: grid;
+  grid-template-columns: 44px 110px minmax(0, 1fr);
+  gap: 4px 8px;
+  align-items: center;
+}
+
+.operand-token {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #eef5fb;
+  color: #2c5879;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 24px;
+  text-align: center;
+}
+
+.operand-meaning {
+  overflow: hidden;
+  color: #475d74;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operand-selected {
+  grid-column: 3;
+  margin-top: -2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.formula-tip {
   display: flex;
   flex-wrap: wrap;
-  gap: 0 12px;
+  align-items: center;
+  gap: 2px;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid #f2e2b8;
+  border-radius: 5px;
+  background: #fff8e6;
+  color: #a06a1b;
+  font-size: 11px;
 }
 
-.derivative-option-group :deep(.el-checkbox) {
+.derivative-dialog {
+  display: grid;
+  gap: 12px;
+}
+
+.derivative-dialog-tip {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.derivative-block {
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: #fbfdff;
+}
+
+.derivative-block-head {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.derivative-check-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 14px;
+}
+
+.derivative-check-group :deep(.el-checkbox) {
   margin-right: 0;
 }
 
@@ -760,27 +1224,33 @@ async function save() {
 .builder-check-row small { display: block; color: var(--muted); }
 .compact-builder { width: 100%;}
 
+@media (max-width: 1200px) {
+  .basic-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .basic-span-2 {
+    grid-column: 1 / -1;
+  }
+
+  .basic-span-all {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 1000px) {
   .builder-config-grid {
     grid-template-columns: 1fr;
   }
-
-  .builder-basic-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
-@media (max-width: 1180px) {
-  .form-grid {
+@media (max-width: 720px) {
+  .basic-form-grid {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 640px) {
-  .builder-basic-grid {
-    grid-template-columns: 1fr;
-  }
-
   .measure-config-row {
     grid-template-columns: 1fr 1fr 32px;
     align-items: end;
@@ -793,5 +1263,43 @@ async function save() {
   .filter-config-row {
     grid-template-columns: 1fr 1fr;
   }
+}
+.formula-system-note {
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  border-radius: 4px;
+  background-color: #f0f5ff;
+  color: #3a6fb5;
+}
+.formula-system-note.warning {
+  background-color: #fff7e6;
+  color: #c27500;
+}
+.formula-system-note code {
+  background-color: rgba(0, 0, 0, 0.05);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.trial-section .trial-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.trial-section .trial-date-label {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.trial-section .trial-date-item {
+  margin-bottom: 0;
+}
+.trial-section .trial-date-item :deep(.el-date-editor) {
+  width: 160px;
+}
+.trial-section .trial-date-item:last-child {
+  margin-right: 4px;
 }
 </style>

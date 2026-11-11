@@ -81,6 +81,18 @@ def list_indicators(
     return {"items": [indicator_to_dict(row) for row in rows], "total": total, "page": page, "pageSize": pageSize}
 
 
+def _biz_date_type(config: dict, model: DataModel | None) -> str:
+    """指标自身配置的业务时间类型；老指标未配置时回退模型配置。"""
+    biz = config.get("bizDate")
+    if isinstance(biz, dict) and biz.get("type"):
+        return str(biz.get("type") or "")
+    return (model.biz_date_type or "") if model else ""
+
+
+def _period_type(config: dict, model: DataModel | None) -> str:
+    return "period" if _biz_date_type(config, model) == "period" else "point"
+
+
 @router.get("/indicators/options")
 def list_indicators_options(db: Session = Depends(get_db)) -> list[dict]:
     """轻量指标选项（给下拉/统计/同表筛选用），不含 config/sqlText 等重字段。
@@ -93,8 +105,10 @@ def list_indicators_options(db: Session = Depends(get_db)) -> list[dict]:
         try:
             config = json.loads(row.config_json)
             rt = (config.get("schedule") or {}).get("resultTable") or "T_IND_RESULT_D"
+            biz_date_type = _biz_date_type(config, None)
         except Exception:
             rt = "T_IND_RESULT_D"
+            biz_date_type = ""
         result.append({
             "id": row.id,
             "code": row.code,
@@ -104,6 +118,7 @@ def list_indicators_options(db: Session = Depends(get_db)) -> list[dict]:
             "status": row.status,
             "favorite": row.favorite,
             "periodType": row.period_type,
+            "bizDateType": biz_date_type,
             "parentId": row.parent_id or "",
             "resultTable": rt,
             "createdAt": row.created_at.strftime("%Y-%m-%d %H:%M:%S"),
@@ -132,7 +147,7 @@ def create_indicator(payload: IndicatorIn, db: Session = Depends(get_db)) -> dic
         raise HTTPException(400, "数据模型不存在")
     code = _next_indicator_code(db)
     sql_text = build_indicator_sql(db, payload.config)
-    period_type = "period" if model and model.biz_date_type == "period" else "point"
+    period_type = _period_type(payload.config, model)
     ind = Indicator(id=new_id("ind"), code=code, name=payload.name, model_id=payload.modelId or None, parent_id=payload.parentId or None, category_id=payload.categoryId, status=payload.status, period_type=period_type, config_json=json.dumps(payload.config, ensure_ascii=False), sql_text=sql_text)
     db.add(ind)
     db.add(IndicatorVersion(indicator_id=ind.id, version=1, config_json=ind.config_json, sql_text=sql_text))
@@ -165,7 +180,7 @@ def update_indicator(indicator_id: str, payload: IndicatorIn, db: Session = Depe
     ).first() if payload.modelId else None
     if payload.modelId and not model:
         raise HTTPException(400, "数据模型不存在")
-    ind.period_type = "period" if model and model.biz_date_type == "period" else "point"
+    ind.period_type = _period_type(payload.config, model)
     ind.config_json = json.dumps(payload.config, ensure_ascii=False)
     ind.sql_text = build_indicator_sql(db, payload.config)
     ind.updated_at = datetime.now()
@@ -218,6 +233,7 @@ def versions(indicator_id: str, db: Session = Depends(get_db)) -> list[dict]:
 
 @router.post("/indicators/{indicator_id}/versions/{version_id}/restores")
 def restore_version(indicator_id: str, version_id: int, db: Session = Depends(get_db)) -> dict:
+    
     ind = _active_indicator(db, indicator_id)
     if not ind:
         raise HTTPException(404, "指标不存在")

@@ -113,37 +113,11 @@
           <div class="muted run-dialog-meta">{{ runTarget.code }} · {{ runTarget.name }}</div>
           <el-form label-width="90px">
             <template v-if="runTargetBiz === 'period'">
-              <el-form-item label="开始日期" required>
-                <el-select v-model="dateStartOption" style="width:100%">
-                  <el-option value="month_start" label="本月初" />
-                  <el-option value="prev_month_start" label="上月初" />
-                  <el-option value="year_start" label="年初" />
-                  <el-option value="month" label="月份" />
-                  <el-option value="specific" label="具体日期" />
-                </el-select>
-              </el-form-item>
-              <el-form-item v-if="dateStartOption==='month'" label="月份" required><el-input v-model="dateStartMonth" type="month" /></el-form-item>
-              <el-form-item v-if="dateStartOption==='specific'" label="日期" required><el-input v-model="dateStartSpecific" type="date" /></el-form-item>
-              <el-form-item label="结束日期" required>
-                <el-select v-model="dateEndOption" style="width:100%">
-                  <el-option value="today" label="今天" />
-                  <el-option value="t1" label="T-1" />
-                  <el-option value="last_workday" label="最近工作日" />
-                  <el-option value="specific" label="具体日期" />
-                </el-select>
-              </el-form-item>
-              <el-form-item v-if="dateEndOption==='specific'" label="日期" required><el-input v-model="dateEndSpecific" type="date" /></el-form-item>
+              <el-form-item label="开始日期" required><el-input v-model="dateStartSpecific" type="date" /></el-form-item>
+              <el-form-item label="结束日期" required><el-input v-model="dateEndSpecific" type="date" /></el-form-item>
             </template>
             <template v-else-if="runTargetBiz === 'balance'">
-              <el-form-item label="业务日期" required>
-                <el-select v-model="dateSingleOption" style="width:100%">
-                  <el-option value="today" label="今天" />
-                  <el-option value="t1" label="T-1" />
-                  <el-option value="last_workday" label="最近工作日" />
-                  <el-option value="specific" label="具体日期" />
-                </el-select>
-              </el-form-item>
-              <el-form-item v-if="dateSingleOption==='specific'" label="日期" required><el-input v-model="dateSingleSpecific" type="date" /></el-form-item>
+              <el-form-item label="业务日期" required><el-input v-model="dateSingleSpecific" type="date" /></el-form-item>
             </template>
             <el-form-item v-else label="运行日期" required>
               <el-input v-model="runDate" type="date" />
@@ -181,7 +155,7 @@
           </el-form-item>
           <template v-if="batchDateType==='period'">
             <el-form-item label="开始日期" required>
-              <el-select v-model="batchStartOption" style="width:100%"><el-option value="month_start" label="本月初" /><el-option value="prev_month_start" label="上月初" /><el-option value="year_start" label="年初" /><el-option value="month" label="月份" /><el-option value="specific" label="具体日期" /></el-select>
+              <el-select v-model="batchStartOption" style="width:100%"><el-option value="month_start" label="本月初" /><el-option value="year_start" label="年初" /><el-option value="month" label="月份" /><el-option value="specific" label="具体日期" /></el-select>
             </el-form-item>
             <el-form-item v-if="batchStartOption==='month'" label="月份" required><el-input v-model="batchStartMonth" type="month" /></el-form-item>
             <el-form-item v-if="batchStartOption==='specific'" label="日期" required><el-input v-model="batchStartSpecific" type="date" /></el-form-item>
@@ -304,20 +278,17 @@ const IndicatorsPage = defineComponent({
     const modelFilter = vueRef('all')
     const sqlIndicator = vueRef<IndicatorT | null>(null)
     const runDialogOpen = vueRef(false)
-    const runTarget = vueRef<{ id: string; code: string; name: string; modelId: string } | null>(null)
+    const runTarget = vueRef<{ id: string; code: string; name: string; modelId: string; bizDateType?: 'balance' | 'period' | '' } | null>(null)
     const runDate = vueRef('2026-07-10')
     const runLoading = vueRef(false)
     const runResult = vueRef<{ rowCount: number; sqlText: string } | null>(null)
     const runError = vueRef('')
-    // 业务日期选项
-    const dateSingleOption = vueRef('today')
+    // 业务日期：运行界面按指标自身的业务时间类型，由用户直接指定具体日期
     const dateSingleSpecific = vueRef('')
-    const dateStartOption = vueRef('month_start')
-    const dateStartMonth = vueRef('')
     const dateStartSpecific = vueRef('')
-    const dateEndOption = vueRef('today')
     const dateEndSpecific = vueRef('')
     const runTargetBiz = vueComputed(() => {
+      if (runTarget.value?.bizDateType) return runTarget.value.bizDateType
       const model = props.data.models.find((m) => m.id === runTarget.value?.modelId)
       return model?.bizDateType || ''
     })
@@ -441,9 +412,9 @@ const IndicatorsPage = defineComponent({
       if (!target) return
       runTarget.value = target
       runDate.value = '2026-07-10'
-      dateSingleOption.value = 'today'; dateSingleSpecific.value = ''
-      dateStartOption.value = 'month_start'; dateStartMonth.value = ''; dateStartSpecific.value = ''
-      dateEndOption.value = 'today'; dateEndSpecific.value = ''
+      dateSingleSpecific.value = ''
+      dateStartSpecific.value = ''
+      dateEndSpecific.value = ''
       runResult.value = null
       runError.value = ''
       runDialogOpen.value = true
@@ -452,17 +423,31 @@ const IndicatorsPage = defineComponent({
       if (runTargetBiz.value === 'period') {
         return {
           type: 'period',
-          start: { option: dateStartOption.value, value: dateStartOption.value === 'month' ? dateStartMonth.value : (dateStartOption.value === 'specific' ? dateStartSpecific.value : '') },
-          end: { option: dateEndOption.value, value: dateEndOption.value === 'specific' ? dateEndSpecific.value : '' },
+          start: { option: 'specific', value: dateStartSpecific.value },
+          end: { option: 'specific', value: dateEndSpecific.value },
         }
       }
       if (runTargetBiz.value === 'balance') {
-        return { type: 'balance', single: { option: dateSingleOption.value, value: dateSingleOption.value === 'specific' ? dateSingleSpecific.value : '' } }
+        return { type: 'balance', single: { option: 'specific', value: dateSingleSpecific.value } }
       }
       return null
     }
     async function doRun() {
       if (!runTarget.value) return
+      if (runTargetBiz.value === 'balance' && !dateSingleSpecific.value) {
+        runError.value = '请选择业务日期'
+        return
+      }
+      if (runTargetBiz.value === 'period') {
+        if (!dateStartSpecific.value || !dateEndSpecific.value) {
+          runError.value = '请选择开始日期和结束日期'
+          return
+        }
+        if (dateStartSpecific.value > dateEndSpecific.value) {
+          runError.value = '开始日期不能晚于结束日期'
+          return
+        }
+      }
       runLoading.value = true
       runError.value = ''
       runResult.value = null
@@ -629,7 +614,7 @@ const IndicatorsPage = defineComponent({
       currentPage.value = 1
       loadIndicators()
     }
-    return { selectedCategoryId, categoryTree, categoryCount, onCategoryClick, createCategory, confirmCreateCategory, deleteCategory, createDialogOpen, newCategoryName, searchText, keyword, statusFilter, modelFilter, sqlIndicator, sqlDialogOpen, runDialogOpen, runTarget, runTargetBiz, runDate, dateSingleOption, dateSingleSpecific, dateStartOption, dateStartMonth, dateStartSpecific, dateEndOption, dateEndSpecific, runLoading, runResult, runError, doRun, goToResults, onSelectionChange, openBatchRun, doBatchRun, batchOpen, batchScope, batchCategoryId, batchSelectedIds, batchDateType, batchSingleOption, batchSingleSpecific, batchStartOption, batchStartMonth, batchStartSpecific, batchEndOption, batchEndSpecific, batchLoading, batchResult, pageSize, currentPage, tableMaxHeight, total, indicatorList, loading, categoryName, typeName, statusName, query, resetFilters, emit, run, copy, updateStatus, toggleFavorite, remove, showSql, getBizCaliber, getResultTable, modelDisplayName, loadIndicators, exportLoading, exportJson, importDialogOpen, fileInput, importFileName, importReport, importLoading, importDone, importDoneMessage, openImportDialog, onImportFileChange, doImport }
+    return { selectedCategoryId, categoryTree, categoryCount, onCategoryClick, createCategory, confirmCreateCategory, deleteCategory, createDialogOpen, newCategoryName, searchText, keyword, statusFilter, modelFilter, sqlIndicator, sqlDialogOpen, runDialogOpen, runTarget, runTargetBiz, runDate, dateSingleSpecific, dateStartSpecific, dateEndSpecific, runLoading, runResult, runError, doRun, goToResults, onSelectionChange, openBatchRun, doBatchRun, batchOpen, batchScope, batchCategoryId, batchSelectedIds, batchDateType, batchSingleOption, batchSingleSpecific, batchStartOption, batchStartMonth, batchStartSpecific, batchEndOption, batchEndSpecific, batchLoading, batchResult, pageSize, currentPage, tableMaxHeight, total, indicatorList, loading, categoryName, typeName, statusName, query, resetFilters, emit, run, copy, updateStatus, toggleFavorite, remove, showSql, getBizCaliber, getResultTable, modelDisplayName, loadIndicators, exportLoading, exportJson, importDialogOpen, fileInput, importFileName, importReport, importLoading, importDone, importDoneMessage, openImportDialog, onImportFileChange, doImport }
   },
 
 })

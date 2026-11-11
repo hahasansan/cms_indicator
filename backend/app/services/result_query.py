@@ -15,7 +15,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.entity.models import DataModel, Indicator
-from app.services.sql_engine import result_dimension_names, result_metric_names
+from app.services.sql_engine import (
+    biz_date_config,
+    derivative_alias,
+    measures_of,
+    result_dimension_names,
+    result_metric_names,
+)
 from app.services.result_writer import UNIFIED_TABLE
 
 
@@ -70,6 +76,16 @@ class PhysicalResultQuery:
             if not field_map:
                 continue
             config = json.loads(indicator.config_json)
+            # 构建度量别名 -> 显示小数位数映射（衍生度量继承基础度量精度）
+            measure_precision: dict[str, int | None] = {}
+            for measure in measures_of(config):
+                alias = measure.get("alias") or measure.get("fieldName")
+                if not alias:
+                    continue
+                precision = measure.get("displayPrecision")
+                measure_precision[alias] = precision
+                for derivative in measure.get("derivatives") or []:
+                    measure_precision[derivative_alias(alias, derivative)] = precision
             dimensions = [
                 alias for alias in result_dimension_names(config, self.db)
                 if alias != "DATA_DATE" and alias in field_map
@@ -101,6 +117,7 @@ class PhysicalResultQuery:
                 "alias": alias,
                 "indicatorName": indicator.name,
                 "indicatorCode": indicator.code,
+                "displayPrecision": measure_precision.get(alias),
             } for alias in measures)
             indicator_rows.append((
                 indicator,
@@ -255,11 +272,13 @@ class PhysicalResultQuery:
             DataModel.id == indicator.model_id,
             DataModel.deleted_at.is_(None),
         ).first() if indicator.model_id else None
+        indicator_config = json.loads(indicator.config_json)
+        indicator_biz = biz_date_config(indicator_config, model)
         date_cond = self._date_condition(
             period_type,
             query,
             params,
-            use_business_time=bool(model and model.biz_date_field),
+            use_business_time=bool(indicator_biz["field"]),
         )
 
         select_parts = [f'r."{c}" AS "{c}"' for c in field_cols]
@@ -293,11 +312,11 @@ class PhysicalResultQuery:
         physical_rows = self.db.execute(text(sql), params).mappings().all()
         parameter_names = (
             {
-                "type": model.biz_date_type,
-                "start": model.biz_date_start_param,
-                "end": model.biz_date_end_param,
+                "type": indicator_biz["type"],
+                "start": indicator_biz["start_param"],
+                "end": indicator_biz["end_param"],
             }
-            if model else {}
+            if indicator_biz["field"] else {}
         )
         return self._to_api_rows(indicator, physical_rows, field_map, period_type, parameter_names)
 
